@@ -72,6 +72,7 @@ echo "Q Cutoff            : ${q_cutoff:-}"
 echo "Cutoff Percent      : ${cutoff_pct:-}"
 echo "Sample Names        : ${detected_samples_str} (auto-detected from Fastq/)"
 echo "Reorganize          : ${reorganize:-}"
+echo "Notify Email        : ${notify_email:-(none - notifications disabled)}"
 echo "===================================================="
 
 # -----------------------------------------------------------------------------
@@ -145,16 +146,24 @@ if ! command -v condor_submit > /dev/null 2>&1; then
     preflight_errors+=("condor_submit was not found on PATH. Is HTCondor installed/loaded on this machine?")
 fi
 
+# notify_email is optional. If set, HTCondor emails that address on job
+# failure; if left blank, notification is disabled entirely.
+if [[ -n "${notify_email:-}" && ! "${notify_email}" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+    preflight_errors+=("notify_email ('${notify_email}') doesn't look like a valid email address. Leave it blank to disable notifications.")
+fi
+
 if [[ "${#sample_names_array[@]}" -eq 0 ]]; then
     preflight_errors+=("No sample fastq files found in '${data_filepath:-}/Fastq'. Expected names like {sample}_S{#}_L001_R1_001.fastq.gz.")
 else
     for s in "${sample_names_array[@]}"; do
-        if ! compgen -G "${data_filepath}/Fastq/${s}_S*_L001_R1_001.fastq.gz" > /dev/null 2>&1 \
+        # Check top-level Fastq/ (compressed or already-decompressed from a
+        # previous run) and Fastq/<sample>/ (already moved by merge_reads.sh).
+        if ! compgen -G "${data_filepath}/Fastq/${s}_S*_L001_R1_001.fastq*" > /dev/null 2>&1 \
            && ! compgen -G "${data_filepath}/Fastq/${s}/${s}_S*_L001_R1_001.fastq*" > /dev/null 2>&1; then
             preflight_errors+=("Sample '${s}': R1 fastq file not found.")
         fi
         if [[ "${merge:-}" == "TRUE" || "${singleend:-}" == "FALSE" ]]; then
-            if ! compgen -G "${data_filepath}/Fastq/${s}_S*_L001_R2_001.fastq.gz" > /dev/null 2>&1 \
+            if ! compgen -G "${data_filepath}/Fastq/${s}_S*_L001_R2_001.fastq*" > /dev/null 2>&1 \
                && ! compgen -G "${data_filepath}/Fastq/${s}/${s}_S*_L001_R2_001.fastq*" > /dev/null 2>&1; then
                 preflight_errors+=("Sample '${s}': paired-end run but R2 fastq file not found.")
             fi
@@ -180,7 +189,10 @@ echo "Preflight validation passed."
 if [[ "$merge" == "FALSE" || "$singleend" == "TRUE" ]]; then
     cd "${data_filepath}/Fastq"
     if compgen -G "*.fastq.gz" > /dev/null 2>&1; then
-        gunzip -- *.fastq.gz
+        # -f is required here, not just a nice-to-have: files pulled from the
+        # GLBRC Data Catalog via `datasync files pull` land as symlinks, and
+        # gunzip can refuse/misbehave on a symlinked source without -f.
+        gunzip -f -- *.fastq.gz
     fi
 fi
 
@@ -200,6 +212,16 @@ if ! "${compiler_filepath}" -static-libstdc++ -o QF3.out QF3.cpp; then
     exit 1
 fi
 
+# notify_email is optional: if unset, disable HTCondor email notifications
+# entirely but still give notify_user a harmless, non-empty value.
+if [[ -n "${notify_email:-}" ]]; then
+    notification_value="ERROR"
+    notify_user_value="${notify_email}"
+else
+    notification_value="NEVER"
+    notify_user_value="$(whoami)"
+fi
+
 # Prepare condor submit file from template.
 # NOTE: the template is intentionally kept in place (not deleted) so this
 # script can be re-run without re-cloning the repo.
@@ -209,6 +231,8 @@ sed -e "s|{{ARGS}}|$params_file|g" \
     -e "s|{{CPUS}}|${cpus}|g" \
     -e "s|{{MEMORY}}|${memory}|g" \
     -e "s|{{DISK}}|${disk}|g" \
+    -e "s|{{NOTIFICATION}}|${notification_value}|g" \
+    -e "s|{{NOTIFY_USER}}|${notify_user_value}|g" \
     submit_template.sub > process_ngs.sub
 
 # Submit the job with condor_submit

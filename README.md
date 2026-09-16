@@ -92,7 +92,7 @@ Publish CNS
 ---
 
 ## Acknowledgements
-Initial scripts and framework are based on work from Anthony Meger and Phil Huss, modified by me, and in many cases reviewed/updated by an LLM. I always carefully review LLM-generated code and take responsibility for the content here.
+Initial scripts and framework are based on work from Anthony Meger, modified by me, and in many cases reviewed/updated by an LLM. I always carefully review LLM-generated code and take responsibility for the content here.
 
 ## Changelog
 

@@ -198,6 +198,18 @@ fi
 
 cd "${data_filepath}/pipeline"
 
+# merge_reads.sh is the file HTCondor directly executes on the remote node
+# (see submit_template.sub's `executable =` line). On a shared filesystem
+# like Scarcity's, HTCondor runs it in place from disk rather than a
+# transferred sandbox copy, so it must carry the execute bit *on disk* --
+# git does not preserve/restore this reliably across clones, and a missing
+# +x here surfaces as a cryptic "errno=13: Permission denied" from HTCondor
+# with no other clue. Set it unconditionally rather than just checking.
+if ! chmod +x merge_reads.sh; then
+    echo "Error: could not set the execute bit on merge_reads.sh." >&2
+    exit 1
+fi
+
 # Prepare C++ filtering script from template.
 # NOTE: the template is intentionally kept in place (not deleted) so this
 # script can be re-run without re-cloning the repo.

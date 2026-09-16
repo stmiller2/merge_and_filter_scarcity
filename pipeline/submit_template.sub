@@ -1,0 +1,16 @@
+universe = vanilla
+log = condor.log
+error = condor.err
+
+executable = merge_reads.sh
+arguments = {{ARGS}}
+
+transfer_input_files = {{INPUT_FILES}}
+
+initialdir = {{INITIALDIR}}
+
+request_cpus = {{CPUS}}
+request_memory = {{MEMORY}}
+request_disk = {{DISK}}
+
+queue 1

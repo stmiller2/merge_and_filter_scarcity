@@ -1,0 +1,15 @@
+# Ignore temporary/system files
+.DS_Store
+*.tmp
+
+# Generated at pipeline runtime (see process_ngs.sh / merge_reads.sh)
+run_progress.log
+process_ngs.sub
+QF3.cpp
+condor.log
+condor.err
+
+# Sequencing data and pipeline outputs (not source-controlled)
+Fastq/*
+!Fastq/paste_fastq_files_here
+csvs/

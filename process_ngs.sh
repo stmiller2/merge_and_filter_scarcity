@@ -237,7 +237,13 @@ fi
 # Prepare condor submit file from template.
 # NOTE: the template is intentionally kept in place (not deleted) so this
 # script can be re-run without re-cloning the repo.
-sed -e "s|{{ARGS}}|$params_file|g" \
+# ARGS must be an absolute path, not just "$params_file": on a shared
+# filesystem like Scarcity's, HTCondor runs the job in place rather than
+# transferring it into a sandbox, so a bare filename is resolved relative to
+# `initialdir` (.../pipeline/) -- one directory above where params.env
+# actually lives -- and merge_reads.sh fails with "No such file or
+# directory" trying to source it.
+sed -e "s|{{ARGS}}|${data_filepath}/${params_file}|g" \
     -e "s|{{INPUT_FILES}}|${data_filepath}/${params_file}|g" \
     -e "s|{{INITIALDIR}}|${data_filepath}/pipeline|g" \
     -e "s|{{CPUS}}|${cpus}|g" \

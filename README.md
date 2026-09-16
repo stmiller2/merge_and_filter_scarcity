@@ -1,4 +1,4 @@
-# NGS Processing Pipeline - Version 11
+# NGS Processing Pipeline - Version 13
 **Updated:** 09/16/2026
 
 **Contact:** stmiller2@wisc.edu
@@ -110,6 +110,12 @@ Publish CNS
 ---
 
 ## Changelog
+
+### Version 13 — 09/16/2026
+- Fixed the next Scarcity submission failure: after the executable-permission fix, jobs failed with `merge_reads.sh: line 15: params.env: No such file or directory` followed by `data_filepath: unbound variable`. The condor submit file's `arguments` was set to the bare filename `params.env`, which is resolved relative to `initialdir` (`.../pipeline/`) — one directory above where `params.env` actually lives. This was silently fine on CHTC, where HTCondor transfers the job into a private sandbox and both files land together, but Scarcity runs jobs in place on its shared filesystem, so the bare filename pointed at the wrong directory. `process_ngs.sh` now passes `params.env`'s full absolute path as the job argument instead, which is correct regardless of whether the execute model transfers files or runs in place.
+
+### Version 12 — 09/16/2026
+- Fixed a job-submission failure on Scarcity: HTCondor reported `Failed to execute '.../pipeline/merge_reads.sh' ... errno=13: Permission denied`. `merge_reads.sh` is the file HTCondor directly runs on the remote node (`executable =` in `submit_template.sub`), and it was tracked without the execute bit set — nothing in the pipeline or the old README ever `chmod +x`'d it (only `process_ngs.sh` got that treatment, but that's not the file Condor executes remotely). On a shared filesystem like Scarcity's, HTCondor runs the executable in place from disk rather than a transferred sandbox copy, so the on-disk permission bit matters and git alone doesn't guarantee it survives a clone/copy. `process_ngs.sh` now unconditionally `chmod +x`'s `merge_reads.sh` right before compiling/submitting, so this can't recur regardless of how the repo got onto the cluster.
 
 ### Version 11 — 09/16/2026
 - Ported the pipeline (and this README) from CHTC to **Scarcity**, the WEI/GLBRC HTCondor cluster. No changes were needed to the core job logic — both are plain HTCondor pools with a shared home-directory filesystem — but the following were updated:

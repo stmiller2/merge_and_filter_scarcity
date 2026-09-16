@@ -96,14 +96,14 @@ Initial scripts and framework are based on work from Anthony Meger, modified by 
 ## Changelog
 
 ### Version 10 — 09/16/2026
-- Sped up the `merge=FALSE` (reverse-complement + concatenate) path in `merge_reads.sh`. 
-- Fixed bug in `merge=FALSE` where the R2 quality string wasn't reversed to match reverse-complemented reads. This didn't affect which reads passed or failed filtering (that only depends on the *set* of quality values present, not their order), but it did make the reported failure position in `poor_reads.csv`'s "E1" column wrong for reads that failed via the q_floor check.
 - Ported the pipeline from BCC to **Scarcity**. No changes needed to core logic but the following were updated:
   - For `merge=FALSE`, `process_ngs.sh`'s decompression step now uses `gunzip -f` instead of plain `gunzip` (otherwise this breaks with symlinks from data catalog).
   - `pipeline/submit_template.sub` has minor updates to fit Scarcity's options
   - README updates for scarcity workflow
-- Sample names are now auto-detected from filenames in `Fastq/` and don't need to be set in `params.env`
-- Added preflight validation to `process_ngs.sh` to check that paths and executables exist, parameters are valid, and that every detected sample has the expected fastq files. Reports all problems at once before submitting to HTCondor.
-- Added more informative error messages throughout all scripts.
-- Made it easier to rerun the pipeline after error: `process_ngs.sh` doesn't delete templates `QF3_template.cpp`/`submit_template.sub` anymore and `get_stats.sh` overwrites `info.csv` instead of concatenating.
-- Added a changelog :)
+- Other quality of life improvements:
+   - Faster reverse-complementing & concatenation when `merge=FALSE`
+   - Sample names are now auto-detected from filenames in `Fastq/` and don't need to be set in `params.env`
+   - Preflight check gives all errors at once before submitting to HTCondor
+   - Added more informative error messages throughout all scripts.
+   - Made it easier to rerun the pipeline after error: `process_ngs.sh` doesn't delete templates `QF3_template.cpp`/`submit_template.sub` anymore and `get_stats.sh` overwrites `info.csv` instead of concatenating.
+   - Added a changelog :)

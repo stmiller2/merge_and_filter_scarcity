@@ -15,9 +15,7 @@ request_memory = {{MEMORY}}
 request_disk = {{DISK}}
 
 # notify_email in params.env controls this: set to ERROR + your address if
-# provided, otherwise NEVER (see process_ngs.sh). merge_reads.sh redirects
-# almost all of its own output to run_progress.log, so condor.out/condor.err
-# mainly catch failures that happen before that redirect takes effect.
+# provided, otherwise NEVER (see process_ngs.sh).
 notification = {{NOTIFICATION}}
 notify_user = {{NOTIFY_USER}}
 

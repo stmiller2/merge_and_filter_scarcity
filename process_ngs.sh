@@ -19,11 +19,9 @@ fi
 source "$params_file"
 
 # -----------------------------------------------------------------------------
-# Derive sample names from Fastq/ filenames instead of a manually maintained
-# params.env list. Expected naming convention (see README):
+# Derive sample names from Fastq/ filenames 
+# Expected naming convention (see README):
 #   {samplename}_S{#}_L001_R1_001.fastq.gz  (and _R2_ for paired-end)
-# Also looks one directory level down, since a prior run may have already
-# moved a sample's files into Fastq/<sample>/ (see merge_reads.sh).
 # -----------------------------------------------------------------------------
 derive_sample_names() {
     local fastq_dir="$1"
@@ -31,9 +29,7 @@ derive_sample_names() {
     local -a names=()
     shopt -s nullglob
     for f in "${fastq_dir}"/*_S*_L001_R1_001.fastq.gz \
-             "${fastq_dir}"/*_S*_L001_R1_001.fastq \
-             "${fastq_dir}"/*/*_S*_L001_R1_001.fastq.gz \
-             "${fastq_dir}"/*/*_S*_L001_R1_001.fastq; do
+             "${fastq_dir}"/*_S*_L001_R1_001.fastq; do
         base=$(basename "$f")
         base="${base%_S*_L001_R1_001.fastq.gz}"
         base="${base%_S*_L001_R1_001.fastq}"
@@ -77,8 +73,7 @@ echo "===================================================="
 
 # -----------------------------------------------------------------------------
 # PREFLIGHT VALIDATION
-# Collect every problem before failing, so a bad config is reported all at
-# once instead of one condor-queue-wasting attempt at a time.
+# Report all errors at once before sending to HTCondor
 # -----------------------------------------------------------------------------
 preflight_errors=()
 
@@ -191,36 +186,26 @@ fi
 echo "Preflight validation passed."
 
 # -----------------------------------------------------------------------------
-# Decompress fastqs when the downstream steps need plain-text input.
-# Skipped harmlessly if there's nothing to decompress (e.g. on a rerun).
+# Decompress fastqs when the downstream steps require plain-text input.
 # -----------------------------------------------------------------------------
 if [[ "$merge" == "FALSE" || "$singleend" == "TRUE" ]]; then
     cd "${data_filepath}/Fastq"
     if compgen -G "*.fastq.gz" > /dev/null 2>&1; then
-        # -f is required here, not just a nice-to-have: files pulled from the
-        # GLBRC Data Catalog via `datasync files pull` land as symlinks, and
-        # gunzip can refuse/misbehave on a symlinked source without -f.
+        # -f is required here if files pulled from the GLBRC Data Catalog 
+        # via `datasync files pull` as symlinks.
         gunzip -f -- *.fastq.gz
     fi
 fi
 
 cd "${data_filepath}/pipeline"
 
-# merge_reads.sh is the file HTCondor directly executes on the remote node
-# (see submit_template.sub's `executable =` line). On a shared filesystem
-# like Scarcity's, HTCondor runs it in place from disk rather than a
-# transferred sandbox copy, so it must carry the execute bit *on disk* --
-# git does not preserve/restore this reliably across clones, and a missing
-# +x here surfaces as a cryptic "errno=13: Permission denied" from HTCondor
-# with no other clue. Set it unconditionally rather than just checking.
+# Make merge_reads.sh executable
 if ! chmod +x merge_reads.sh; then
     echo "Error: could not set the execute bit on merge_reads.sh." >&2
     exit 1
 fi
 
 # Prepare C++ filtering script from template.
-# NOTE: the template is intentionally kept in place (not deleted) so this
-# script can be re-run without re-cloning the repo.
 sed -e "s/{{Q_FLOOR}}/$q_floor/" \
     -e "s/{{Q_CUTOFF}}/$q_cutoff/" \
     -e "s/{{CUTOFF_PCT}}/$cutoff_pct/" \
@@ -233,24 +218,15 @@ if ! "${compiler_filepath}" -static-libstdc++ -o QF3.out QF3.cpp; then
 fi
 
 # notify_email is optional: if unset, disable HTCondor email notifications
-# entirely but still give notify_user a harmless, non-empty value.
 if [[ -n "${notify_email:-}" ]]; then
     notification_value="ERROR"
     notify_user_value="${notify_email}"
 else
     notification_value="NEVER"
-    notify_user_value="$(whoami)"
+    notify_user_value="$(whoami)" #harmless placeholder
 fi
 
 # Prepare condor submit file from template.
-# NOTE: the template is intentionally kept in place (not deleted) so this
-# script can be re-run without re-cloning the repo.
-# ARGS must be an absolute path, not just "$params_file": on a shared
-# filesystem like Scarcity's, HTCondor runs the job in place rather than
-# transferring it into a sandbox, so a bare filename is resolved relative to
-# `initialdir` (.../pipeline/) -- one directory above where params.env
-# actually lives -- and merge_reads.sh fails with "No such file or
-# directory" trying to source it.
 sed -e "s|{{ARGS}}|${data_filepath}/${params_file}|g" \
     -e "s|{{INPUT_FILES}}|${data_filepath}/${params_file}|g" \
     -e "s|{{INITIALDIR}}|${data_filepath}/pipeline|g" \

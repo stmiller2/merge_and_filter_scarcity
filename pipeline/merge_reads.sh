@@ -28,9 +28,7 @@ if [ "$reorganize" == "TRUE" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Derive sample names from Fastq/ filenames (same logic used for preflight
-# validation in process_ngs.sh). Looks one directory level down too, since a
-# prior run may have already moved a sample's files into Fastq/<sample>/.
+# Derive sample names from Fastq/ filenames 
 # -----------------------------------------------------------------------------
 derive_sample_names() {
     local fastq_dir="$1"
@@ -38,9 +36,7 @@ derive_sample_names() {
     local -a names=()
     shopt -s nullglob
     for f in "${fastq_dir}"/*_S*_L001_R1_001.fastq.gz \
-             "${fastq_dir}"/*_S*_L001_R1_001.fastq \
-             "${fastq_dir}"/*/*_S*_L001_R1_001.fastq.gz \
-             "${fastq_dir}"/*/*_S*_L001_R1_001.fastq; do
+             "${fastq_dir}"/*_S*_L001_R1_001.fastq; do
         base=$(basename "$f")
         base="${base%_S*_L001_R1_001.fastq.gz}"
         base="${base%_S*_L001_R1_001.fastq}"
@@ -68,10 +64,7 @@ log() {
     fi
 }
 
-# Function to format reads. Accepts one or more input files -- a single-end
-# sample can legitimately be split across several (e.g. multiple lanes), and
-# passing a glob straight through as a single "$1" would silently drop every
-# file after the first match.
+# Function to format reads. Accepts one or more input files (e.g. sample split across lanes)
 format_reads() {
     echo -e "\n$(date '+%I:%M%p') -- FORMATTING READS"
     if ! cat -- "$@" | paste -d '\t' - - - - | awk -F '\t' '{print $2, $4}' > combined.fastq; then
@@ -97,7 +90,6 @@ for i in "${sample_names_array[@]}"; do
     }
 
     # Move this sample's input files in, unless a previous run already did so
-    # (keeps the pipeline safely re-runnable).
     if compgen -G "../${i}_"* > /dev/null 2>&1; then
         if ! mv ../"${i}"_* .; then
             echo "ERROR: failed to move input files for sample ${i}, skipping."
@@ -111,10 +103,6 @@ for i in "${sample_names_array[@]}"; do
     # Merge or concatenate reads
     if [ "$merge" == "TRUE" ]; then
         log start "MERGING PAIRED-END READS"
-        # NOTE: -y reuses the same `memory` value as HTCondor's request_memory
-        # (see process_ngs.sh), but PEAR is stricter about its format: a bare
-        # K/M/G suffix only (e.g. "4G"), no trailing "B" -- process_ngs.sh's
-        # preflight validation enforces this when merge=TRUE.
         pear_output=$("${pear_filepath}" -f *_R1_001.fastq.gz -r *_R2_001.fastq.gz -o combined \
             -y "${memory}" -j "${cpus}" -v "${pear_overlap}" -g "${pear_stattest}" -p "${pear_pvalue}" 2>&1)
         pear_status=$?
@@ -128,19 +116,6 @@ for i in "${sample_names_array[@]}"; do
         format_reads combined.assembled.fastq || { failed_samples+=("$i"); continue; }
     elif [ "$singleend" == "FALSE" ]; then
         log start "CREATING REVERSE COMPLEMENT OF READ 2"
-        # Reshape into one tab-separated record per read (header, seq, plus,
-        # qual), then reverse-complement the sequence column and reverse the
-        # quality column with `rev`/`tr` -- fast, linear-time C tools -- instead
-        # of an awk loop that rebuilds each sequence one character at a time via
-        # repeated substr()/toupper() calls. That loop is what made this step
-        # slow: benchmarked on a 1M-read/150bp file, this rewrite ran ~3.7x
-        # faster (13.8s -> 3.7s) than the old awk loop, and the gap only grows
-        # with read count. This also fixes a latent correctness bug: the old
-        # code reverse-complemented the sequence but never reversed the quality
-        # string to match, so base/quality correspondence for R2 was scrambled
-        # (it didn't change which reads passed/failed filtering, since that
-        # only depends on the *set* of quality values, but it did make the
-        # reported failure position in poor_reads.csv's "E1" column wrong).
         if ! paste -d '\t' - - - - < *_R2_001.fastq > R2.4col.tsv; then
             echo "ERROR: reshaping R2 fastq failed for sample ${i}, skipping."
             failed_samples+=("$i"); continue

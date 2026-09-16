@@ -21,8 +21,7 @@ int main()
 	bool discarded;				//whether read contains bases < q_floor
 	long readCount = 0;			//number of reads actually processed
 
-	//Bail out clearly instead of silently writing empty output files if
-	//combined.fastq is missing (e.g. an earlier merge/formatting step failed)
+	//Bail out if combined.fastq is missing (e.g. an earlier merge/formatting step failed)
 	if(!inRawReads.is_open())
 	{
 		cerr << "Error: could not open input file '" << inMPERs << "'. Was combined.fastq created by the merge/formatting step?" << '\n';
@@ -85,9 +84,6 @@ int main()
 	outGoodReads.close();
 	outPoorReads.close();
 
-	//A merge/formatting failure often produces a present-but-empty
-	//combined.fastq, which the is_open() checks above don't catch on their
-	//own -- flag that case explicitly too.
 	if(readCount == 0)
 	{
 		cerr << "Error: '" << inMPERs << "' contained no reads. Upstream merging/formatting may have failed." << '\n';

@@ -18,8 +18,8 @@ You'll land in your home directory, `/home/GLBRCORG/YOUR_USERNAME`.
 ### STEP 2 — Clone the pipeline
 Within your home directory:
 ```
-git clone https://github.com/stmiller2/merge_and_filter_starterpack
-mv merge_and_filter_starterpack/ my_experiment/
+git clone https://github.com/stmiller2/merge_and_filter_scarcity
+mv merge_and_filter_scarcity/ my_experiment/
 cd my_experiment
 ```
 

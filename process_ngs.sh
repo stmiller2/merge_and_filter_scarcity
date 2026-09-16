@@ -135,8 +135,16 @@ if ! [[ "${cutoff_pct:-}" =~ ^[0-1](\.[0-9]+)?$ ]]; then
     preflight_errors+=("cutoff_pct should be a decimal between 0 and 1 (got '${cutoff_pct:-}').")
 fi
 
-if ! [[ "${memory:-}" =~ ^[0-9]+[A-Za-z]+$ ]]; then
-    preflight_errors+=("memory should look like '2G' (got '${memory:-}').")
+if [[ "${merge:-}" == "TRUE" ]]; then
+    # When merge=TRUE, this same value is passed straight to PEAR's -y flag
+    # (see merge_reads.sh) in addition to HTCondor's request_memory. PEAR is
+    # stricter: it only accepts a bare K/M/G suffix and rejects "4GB" with
+    # "Invalid memory size specified", even though HTCondor accepts either.
+    if ! [[ "${memory:-}" =~ ^[0-9]+[KMGkmg]$ ]]; then
+        preflight_errors+=("memory should be digits followed by a single K/M/G (no trailing 'B') since merge=TRUE also passes it to PEAR's -y flag, e.g. '4G' (got '${memory:-}').")
+    fi
+elif ! [[ "${memory:-}" =~ ^[0-9]+[A-Za-z]+$ ]]; then
+    preflight_errors+=("memory should look like '4GB' (got '${memory:-}').")
 fi
 if ! [[ "${disk:-}" =~ ^[0-9]+[A-Za-z]+$ ]]; then
     preflight_errors+=("disk should look like '60G' (got '${disk:-}').")

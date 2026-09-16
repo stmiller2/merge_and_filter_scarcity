@@ -111,6 +111,10 @@ for i in "${sample_names_array[@]}"; do
     # Merge or concatenate reads
     if [ "$merge" == "TRUE" ]; then
         log start "MERGING PAIRED-END READS"
+        # NOTE: -y reuses the same `memory` value as HTCondor's request_memory
+        # (see process_ngs.sh), but PEAR is stricter about its format: a bare
+        # K/M/G suffix only (e.g. "4G"), no trailing "B" -- process_ngs.sh's
+        # preflight validation enforces this when merge=TRUE.
         pear_output=$("${pear_filepath}" -f *_R1_001.fastq.gz -r *_R2_001.fastq.gz -o combined \
             -y "${memory}" -j "${cpus}" -v "${pear_overlap}" -g "${pear_stattest}" -p "${pear_pvalue}" 2>&1)
         pear_status=$?

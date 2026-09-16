@@ -1,4 +1,4 @@
-# NGS Processing Pipeline - Version 13
+# NGS Processing Pipeline - Version 14
 **Updated:** 09/16/2026
 
 **Contact:** stmiller2@wisc.edu
@@ -78,7 +78,7 @@ vi params.env
 | singleend         | TRUE/FALSE | FALSE for merging paired-end reads; TRUE for formatting & filtering single-end reads |
 | compiler_filepath | filepath   | Path to g++ executable (C++ compiler) — from your Conda env (Step 5) |
 | cpus              | int        | Number of cores requested – suggest 8 |
-| memory            | int + unit | Amount of RAM requested – suggest 4GB |
+| memory            | int + K/M/G | Amount of RAM requested – suggest 4G. **Use a bare K/M/G suffix, not KB/MB/GB** — when `merge=TRUE` this same value is also passed to PEAR's `-y` flag, which rejects a trailing 'B' with "Invalid memory size specified" |
 | disk              | int + unit | Amount of disk space requested – suggest 60GB |
 | q_floor           | int        | Reads with any bases below this value are discarded |
 | q_cutoff          | int        | Reads with too many bases below this value are discarded (see cutoff_pct) |
@@ -110,6 +110,9 @@ Publish CNS
 ---
 
 ## Changelog
+
+### Version 14 — 09/16/2026
+- Fixed a regression I introduced in Version 11: PEAR failed with `Invalid memory size specified`. `merge_reads.sh` passes `params.env`'s `memory` value straight to PEAR's `-y` flag as well as to HTCondor's `request_memory`, but PEAR only accepts a bare `K`/`M`/`G` suffix and rejects `KB`/`MB`/`GB`. Version 11 changed the default from `2G` to `4GB` to match a documentation example for `request_memory` alone, without accounting for this dual use — HTCondor tolerates either format, PEAR does not. Reverted the default to `4G`, and preflight validation now specifically rejects a `...B` suffix on `memory` whenever `merge=TRUE`, so this class of mistake is caught before submission instead of after.
 
 ### Version 13 — 09/16/2026
 - Fixed the next Scarcity submission failure: after the executable-permission fix, jobs failed with `merge_reads.sh: line 15: params.env: No such file or directory` followed by `data_filepath: unbound variable`. The condor submit file's `arguments` was set to the bare filename `params.env`, which is resolved relative to `initialdir` (`.../pipeline/`) — one directory above where `params.env` actually lives. This was silently fine on CHTC, where HTCondor transfers the job into a private sandbox and both files land together, but Scarcity runs jobs in place on its shared filesystem, so the bare filename pointed at the wrong directory. `process_ngs.sh` now passes `params.env`'s full absolute path as the job argument instead, which is correct regardless of whether the execute model transfers files or runs in place.

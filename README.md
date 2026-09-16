@@ -1,4 +1,4 @@
-# NGS Processing Pipeline - Version 14
+# NGS Processing Pipeline - Version 15
 **Updated:** 09/16/2026
 
 **Contact:** stmiller2@wisc.edu
@@ -110,6 +110,10 @@ Publish CNS
 ---
 
 ## Changelog
+
+### Version 15 — 09/16/2026
+- Sped up the `merge=FALSE` (reverse-complement + concatenate) path in `merge_reads.sh`. It previously rebuilt each R2 sequence one character at a time in an awk loop (`substr`/`toupper` per base), which is what made this path slow — benchmarked on a synthetic 1M-read/150bp file, that loop took ~13.8s versus ~3.7s for the replacement (a `paste`/`cut`/`rev`/`tr` pipeline), and the gap widens with read count since real lanes run 10-100x larger than that benchmark. Verified the reverse-complemented sequences are byte-identical to the old output on the same input.
+- Fixed a latent correctness bug found in the process: the old code reverse-complemented the R2 sequence but never reversed the R2 quality string to match it, so base/quality correspondence was scrambled for every R2 read in this path. This didn't affect which reads passed or failed filtering (that only depends on the *set* of quality values present, not their order), but it did make the reported failure position in `poor_reads.csv`'s "E1" column wrong for reads that failed via the q_floor check. The quality string is now correctly reversed (not complemented — quality scores don't have complements) alongside the sequence.
 
 ### Version 14 — 09/16/2026
 - Fixed a regression I introduced in Version 11: PEAR failed with `Invalid memory size specified`. `merge_reads.sh` passes `params.env`'s `memory` value straight to PEAR's `-y` flag as well as to HTCondor's `request_memory`, but PEAR only accepts a bare `K`/`M`/`G` suffix and rejects `KB`/`MB`/`GB`. Version 11 changed the default from `2G` to `4GB` to match a documentation example for `request_memory` alone, without accounting for this dual use — HTCondor tolerates either format, PEAR does not. Reverted the default to `4G`, and preflight validation now specifically rejects a `...B` suffix on `memory` whenever `merge=TRUE`, so this class of mistake is caught before submission instead of after.

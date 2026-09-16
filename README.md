@@ -14,7 +14,7 @@ Connect to the WEI/GLBRC VPN (GlobalProtect, portal `weiglbrc.vpn.wisc.edu`, log
 ssh YOUR_USERNAME@scarcity-submit.glbrc.org
 ```
 You'll land in your home directory, `/home/GLBRCORG/YOUR_USERNAME`.
-If you don't already have a Scarcity account, email the Computational Biology Lead, Kevin Myers (`kmyers2@wisc.edu`), with your estimated storage needs and a short description of your workflow.
+If you don't already have a Scarcity account, email Kevin Myers, with your estimated storage needs and a short description of your workflow.
 
 ### STEP 2 — Clone the pipeline
 Within your home directory:

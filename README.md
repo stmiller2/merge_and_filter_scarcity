@@ -96,14 +96,15 @@ Initial scripts and framework are based on work from Anthony Meger, modified by 
 ## Changelog
 
 ### Version 10 — 09/16/2026
-- Ported the pipeline from BCC to **Scarcity**. No changes needed to core logic but the following were updated:
-  - For `merge=FALSE`, `process_ngs.sh`'s decompression step now uses `gunzip -f` instead of plain `gunzip` (otherwise this breaks with symlinks from data catalog).
+- Ported the pipeline from BCC to **Scarcity**. Core logic is the same with the following changes:
+  - For `merge=FALSE`, `process_ngs.sh` now decompresses with `gunzip -f` (otherwise this breaks with symlinks from data catalog)
   - `pipeline/submit_template.sub` has minor updates to fit Scarcity's options
+  - Minor changes to filepath handling to fit Scarcity's directory structure
   - README updates for scarcity workflow
 - Other quality of life improvements:
    - Faster reverse-complementing & concatenation when `merge=FALSE`
    - Sample names are now auto-detected from filenames in `Fastq/` and don't need to be set in `params.env`
    - Preflight check gives all errors at once before submitting to HTCondor
-   - Added more informative error messages throughout all scripts.
-   - Made it easier to rerun the pipeline after error: `process_ngs.sh` doesn't delete templates `QF3_template.cpp`/`submit_template.sub` anymore and `get_stats.sh` overwrites `info.csv` instead of concatenating.
+   - Added more informative error messages throughout all scripts
+   - Made it easier to rerun the pipeline after error: `process_ngs.sh` doesn't delete templates `QF3_template.cpp`/`submit_template.sub` anymore and `get_stats.sh` overwrites `info.csv` instead of concatenating
    - Added a changelog :)

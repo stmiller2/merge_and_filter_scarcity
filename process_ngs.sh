@@ -28,11 +28,13 @@ derive_sample_names() {
     local f base
     local -a names=()
     shopt -s nullglob
-    for f in "${fastq_dir}"/*_S*_L001_R1_001.fastq.gz \
-             "${fastq_dir}"/*_S*_L001_R1_001.fastq; do
+    for f in "${fastq_dir}"/*_S[0-9]*_R1_001.fastq.gz \
+             "${fastq_dir}"/*_S[0-9]*_R1_001.fastq \
+             "${fastq_dir}"/*/*_S[0-9]*_R1_001.fastq.gz \
+             "${fastq_dir}"/*/*_S[0-9]*_R1_001.fastq; do
         base=$(basename "$f")
-        base="${base%_S*_L001_R1_001.fastq.gz}"
-        base="${base%_S*_L001_R1_001.fastq}"
+        base="${base%_S[0-9]*_R1_001.fastq.gz}"
+        base="${base%_S[0-9]*_R1_001.fastq}"
         names+=("$base")
     done
     shopt -u nullglob
@@ -131,10 +133,6 @@ if ! [[ "${cutoff_pct:-}" =~ ^[0-1](\.[0-9]+)?$ ]]; then
 fi
 
 if [[ "${merge:-}" == "TRUE" ]]; then
-    # When merge=TRUE, this same value is passed straight to PEAR's -y flag
-    # (see merge_reads.sh) in addition to HTCondor's request_memory. PEAR is
-    # stricter: it only accepts a bare K/M/G suffix and rejects "4GB" with
-    # "Invalid memory size specified", even though HTCondor accepts either.
     if ! [[ "${memory:-}" =~ ^[0-9]+[KMGkmg]$ ]]; then
         preflight_errors+=("memory should be digits followed by a single K/M/G (no trailing 'B') since merge=TRUE also passes it to PEAR's -y flag, e.g. '4G' (got '${memory:-}').")
     fi
@@ -156,18 +154,18 @@ if [[ -n "${notify_email:-}" && ! "${notify_email}" =~ ^[^[:space:]@]+@[^[:space
 fi
 
 if [[ "${#sample_names_array[@]}" -eq 0 ]]; then
-    preflight_errors+=("No sample fastq files found in '${data_filepath:-}/Fastq'. Expected names like {sample}_S{#}_L001_R1_001.fastq.gz.")
+    preflight_errors+=("No sample fastq files found in '${data_filepath:-}/Fastq'. Expected names like {sample}_S{#}_R1_001.fastq.gz (a _L001_-style lane segment before _R1_/_R2_ is also fine, but not required).")
 else
     for s in "${sample_names_array[@]}"; do
         # Check top-level Fastq/ (compressed or already-decompressed from a
         # previous run) and Fastq/<sample>/ (already moved by merge_reads.sh).
-        if ! compgen -G "${data_filepath}/Fastq/${s}_S*_L001_R1_001.fastq*" > /dev/null 2>&1 \
-           && ! compgen -G "${data_filepath}/Fastq/${s}/${s}_S*_L001_R1_001.fastq*" > /dev/null 2>&1; then
+        if ! compgen -G "${data_filepath}/Fastq/${s}_S[0-9]*_R1_001.fastq*" > /dev/null 2>&1 \
+           && ! compgen -G "${data_filepath}/Fastq/${s}/${s}_S[0-9]*_R1_001.fastq*" > /dev/null 2>&1; then
             preflight_errors+=("Sample '${s}': R1 fastq file not found.")
         fi
         if [[ "${merge:-}" == "TRUE" || "${singleend:-}" == "FALSE" ]]; then
-            if ! compgen -G "${data_filepath}/Fastq/${s}_S*_L001_R2_001.fastq*" > /dev/null 2>&1 \
-               && ! compgen -G "${data_filepath}/Fastq/${s}/${s}_S*_L001_R2_001.fastq*" > /dev/null 2>&1; then
+            if ! compgen -G "${data_filepath}/Fastq/${s}_S[0-9]*_R2_001.fastq*" > /dev/null 2>&1 \
+               && ! compgen -G "${data_filepath}/Fastq/${s}/${s}_S[0-9]*_R2_001.fastq*" > /dev/null 2>&1; then
                 preflight_errors+=("Sample '${s}': paired-end run but R2 fastq file not found.")
             fi
         fi
@@ -186,13 +184,14 @@ fi
 echo "Preflight validation passed."
 
 # -----------------------------------------------------------------------------
-# Decompress fastqs when the downstream steps require plain-text input.
+# Decompress fastqs when the downstream steps need plain-text input.
 # -----------------------------------------------------------------------------
 if [[ "$merge" == "FALSE" || "$singleend" == "TRUE" ]]; then
     cd "${data_filepath}/Fastq"
     if compgen -G "*.fastq.gz" > /dev/null 2>&1; then
-        # -f is required here if files pulled from the GLBRC Data Catalog 
-        # via `datasync files pull` as symlinks.
+        # -f is required here, not just a nice-to-have: files pulled from the
+        # GLBRC Data Catalog via `datasync files pull` land as symlinks, and
+        # gunzip can refuse/misbehave on a symlinked source without -f.
         gunzip -f -- *.fastq.gz
     fi
 fi

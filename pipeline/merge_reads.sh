@@ -28,18 +28,20 @@ if [ "$reorganize" == "TRUE" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Derive sample names from Fastq/ filenames 
+# Derive sample names from Fastq/ filenames
 # -----------------------------------------------------------------------------
 derive_sample_names() {
     local fastq_dir="$1"
     local f base
     local -a names=()
     shopt -s nullglob
-    for f in "${fastq_dir}"/*_S*_L001_R1_001.fastq.gz \
-             "${fastq_dir}"/*_S*_L001_R1_001.fastq; do
+    for f in "${fastq_dir}"/*_S[0-9]*_R1_001.fastq.gz \
+             "${fastq_dir}"/*_S[0-9]*_R1_001.fastq \
+             "${fastq_dir}"/*/*_S[0-9]*_R1_001.fastq.gz \
+             "${fastq_dir}"/*/*_S[0-9]*_R1_001.fastq; do
         base=$(basename "$f")
-        base="${base%_S*_L001_R1_001.fastq.gz}"
-        base="${base%_S*_L001_R1_001.fastq}"
+        base="${base%_S[0-9]*_R1_001.fastq.gz}"
+        base="${base%_S[0-9]*_R1_001.fastq}"
         names+=("$base")
     done
     shopt -u nullglob
@@ -48,7 +50,7 @@ derive_sample_names() {
 
 mapfile -t sample_names_array < <(derive_sample_names "${data_filepath}/Fastq")
 if [ "${#sample_names_array[@]}" -eq 0 ]; then
-    echo "Error: no fastq files found in ${data_filepath}/Fastq matching {sample}_S{#}_L001_R1_001.fastq[.gz]."
+    echo "Error: no fastq files found in ${data_filepath}/Fastq matching {sample}_S{#}_R1_001.fastq[.gz] (with or without a _L001_-style lane segment)."
     exit 1
 fi
 echo "Detected samples: ${sample_names_array[*]}"
@@ -90,6 +92,7 @@ for i in "${sample_names_array[@]}"; do
     }
 
     # Move this sample's input files in, unless a previous run already did so
+    # (keeps the pipeline safely re-runnable).
     if compgen -G "../${i}_"* > /dev/null 2>&1; then
         if ! mv ../"${i}"_* .; then
             echo "ERROR: failed to move input files for sample ${i}, skipping."

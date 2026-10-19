@@ -67,8 +67,8 @@ vi params.env
 | q_floor           | int        | Reads with any bases below this value are discarded |
 | q_cutoff          | int        | Reads with too many bases below this value are discarded (see cutoff_pct) |
 | cutoff_pct        | float      | Proportion of bases that must be at or above q_cutoff for a read to be kept |
-| end_slop          | int or FALSE | Number of bases at each sequencing-read **5' end** exempt from quality filtering (early-cycle low quality). Never applied to 3' ends: applied to both ends of merged/concatenated paired-end reads, the left end of single-end R1, and the right end of single-end R2 (after reverse-complementing). `FALSE` disables. Reads with nothing left after removing slop go to `poor_reads.csv` as `E3` |
-| trim_slop         | TRUE/FALSE | If TRUE, the end_slop bases are removed from output sequences (**recommended**). If FALSE, they are kept in the output but still not filtered. Ignored when end_slop=FALSE |
+| end_slop          | int or FALSE | Number of bases at each sequencing-read **5' end** exempt from quality filtering (early-cycle low quality). Recommend FALSE unless necessary (inspect fastqs for early-cycle N's) |
+| trim_slop         | TRUE/FALSE | If TRUE, the end_slop bases are removed from output sequences (**recommended**). If FALSE, they are kept in the output but still not used for quality filtering |
 | reorganize        | TRUE/FALSE | If TRUE, all final `good_reads.csv` files (and others) will be reorganized into a single directory (recommended) |
 | notify_email      | email      | Optional. If set, HTCondor emails this address if the job errors out. Leave blank to disable. |
 

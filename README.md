@@ -1,5 +1,5 @@
-# NGS Processing Pipeline - Version 10
-**Updated:** 09/16/2026
+# NGS Processing Pipeline - Version 10.1
+**Updated:** 10/19/2026
 
 **Contact:** stmiller2@wisc.edu
 

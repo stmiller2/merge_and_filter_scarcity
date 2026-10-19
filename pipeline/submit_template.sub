@@ -1,7 +1,7 @@
 universe = vanilla
-log = condor.log
-error = condor.err
-output = condor.out
+log = {{LOGDIR}}/condor.log
+error = {{LOGDIR}}/condor.err
+output = {{LOGDIR}}/condor.out
 
 executable = merge_reads.sh
 arguments = {{ARGS}}

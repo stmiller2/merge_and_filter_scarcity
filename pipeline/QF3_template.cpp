@@ -26,26 +26,22 @@ int main(int argc, char* argv[])
 	const int slop_left  = (ends == "L" || ends == "LR") ? end_slop : 0;
 	const int slop_right = (ends == "R" || ends == "LR") ? end_slop : 0;
 
-	//Initialize variables and open file streams
-	string inMPERs="combined.fastq";
-	ifstream inRawReads(inMPERs.c_str());
+	//Input is streamed on stdin, one read per line as "SEQUENCE QUALITY"
+	//(produced on the fly by merge_reads.sh; nothing is written to disk first)
+	ios::sync_with_stdio(false);
+	cin.tie(nullptr);
+	istream& inRawReads = cin;
 	ofstream outGoodReads("good_reads.csv"), outPoorReads("poor_reads.csv");
 	size_t split;				//position of the split between sequence & quality string
 	double q, g, pct;			//Q-score, # bases > q_cutoff, % bases > q_cutoff
 	int j;						//sequence position when looping through quality string
 	int len, start, stop;		//read length; quality-checked region is [start, stop)
 	int offset;					//shift so reported positions index into the written sequence
-	string line, seq, qual;		//combined.fastq line, DNA sequence, quality string
+	string line, seq, qual;		//input line, DNA sequence, quality string
 	string outSeq;				//sequence as written to output (slop removed if trim_slop)
 	bool discarded;				//whether read contains bases < q_floor
 	long readCount = 0;			//number of reads actually processed
 
-	//Bail out if combined.fastq is missing (e.g. an earlier merge/formatting step failed)
-	if(!inRawReads.is_open())
-	{
-		cerr << "Error: could not open input file '" << inMPERs << "'. Was combined.fastq created by the merge/formatting step?" << '\n';
-		return 1;
-	}
 	if(!outGoodReads.is_open() || !outPoorReads.is_open())
 	{
 		cerr << "Error: could not open 'good_reads.csv' / 'poor_reads.csv' for writing." << '\n';
@@ -120,13 +116,17 @@ int main(int argc, char* argv[])
 			outPoorReads << outSeq << "," << "E1" << "," << j - offset << '\n';
 		}
 	}
-	inRawReads.close();
 	outGoodReads.close();
 	outPoorReads.close();
 
+	if(!outGoodReads || !outPoorReads)
+	{
+		cerr << "Error: failed while writing 'good_reads.csv' / 'poor_reads.csv' (disk full?)." << '\n';
+		return 1;
+	}
 	if(readCount == 0)
 	{
-		cerr << "Error: '" << inMPERs << "' contained no reads. Upstream merging/formatting may have failed." << '\n';
+		cerr << "Error: no reads received on stdin. Upstream merging/formatting may have failed." << '\n';
 		return 1;
 	}
 

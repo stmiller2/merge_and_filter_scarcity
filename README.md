@@ -1,4 +1,4 @@
-# NGS Processing Pipeline - Version 10.2
+# NGS Processing Pipeline - Version 11.0
 **Updated:** 10/19/2026
 
 **Contact:** stmiller2@wisc.edu
@@ -61,15 +61,16 @@ vi params.env
 | merge             | TRUE/FALSE | TRUE for overlapping paired-end reads – merges reads with PEAR. If FALSE, PEAR parameters are ignored and R1 is concatenated to the reverse complement of R2 |
 | singleend         | TRUE/FALSE | FALSE for merging paired-end reads; TRUE for formatting & filtering single-end reads |
 | compiler_filepath | filepath   | Path to g++ executable (C++ compiler) - `/usr/bin/g++` |
+| perl_filepath     | filepath   | Path to perl executable - `/usr/bin/perl` (Only needed for reverse-complementing when merge=FALSE) |
 | cpus              | int        | Number of cores requested – suggest 8 |
 | memory            | int + K/M/G | Amount of RAM requested – suggest 4G. **Needs K/M/G suffix, not KB/MB/GB** |
 | disk              | int + unit | Amount of disk space requested – suggest 60GB |
 | q_floor           | int        | Reads with any bases below this value are discarded |
 | q_cutoff          | int        | Reads with too many bases below this value are discarded (see cutoff_pct) |
 | cutoff_pct        | float      | Proportion of bases that must be at or above q_cutoff for a read to be kept |
-| end_slop          | int or FALSE | Number of bases at each sequencing-read **5' end** exempt from quality filtering (early-cycle low quality). Recommend FALSE unless necessary (inspect fastqs for early-cycle N's) |
-| trim_slop         | TRUE/FALSE | If TRUE, the end_slop bases are removed from output sequences (**recommended**). If FALSE, they are kept in the output but still not used for quality filtering |
-| reorganize        | TRUE/FALSE | If TRUE, all final `good_reads.csv` files (and others) will be reorganized into a single directory (recommended) |
+| end_slop          | int or FALSE | Number of bases at sequencing-read 5' ends exempted from quality filtering. Suggest FALSE unless necessary (inspect fastqs for early-cycle N's) |
+| trim_slop         | TRUE/FALSE | Remove end_slop bases from output sequences - suggest TRUE if using end_slop. If FALSE, they are kept in the output but still not used for quality filtering |
+| space_saver       | TRUE/FALSE | Deletes intermediate files (`work/<sample>/`) once run finishes and gzips `poor_reads` csvs |
 | notify_email      | email      | Optional. If set, HTCondor emails this address if the job errors out. Leave blank to disable. |
 
 ### STEP 5 — Start processing 
@@ -82,15 +83,29 @@ Params will print to the console — double check everything is set correctly be
 ### STEP 6 — Monitor the run
 View a live-updating tail of the run progress with:
 ```
-tail -f -n 50 run_progress.log
+tail -f logs/run_progress.log
 ```
 (exit using ctrl+C). You can also check `condor_q` for overall job status (`RUN`/`IDLE`/`HELD`/etc.).
+
+### Output
+```
+my_experiment/
+├── Fastq/                       raw inputs
+├── csvs/
+│   ├── good_reads/              good_reads_<sample>.csv
+│   ├── poor_reads/              poor_reads_<sample>.csv  (gzipped if space_saver)
+│   └── info/                    info_<sample>.csv  (read counts at each step)
+├── logs/                        run_progress.log, condor.{log,out,err}, params_used.env
+└── work/<sample>/               intermediate files; removed if space_saver (unless sample failed)
+```
+
+`poor_reads` columns: sequence, failure code, value. `E1` = a base below `q_floor` (value = 0-based index of the first such base); `E2` = too few bases at/above `q_cutoff` (value = actual proportion); `E3` = read too short after removing `end_slop` (value = read length).
 
 ### STEP 7 — Transfer data off of scarcity
 Home directory is **not backed up**, so once a run finishes, move anything you want to keep somewhere permanent, such as:
 - Copy final results into `/mnt/bigdata/processed_data/YOUR_USERNAME/` (request a folder from `helpdesk@energy.wisc.edu` if you don't have one yet).
 - Push results to the GLBRC Data Catalog: `datasync files push --dataset-id YOUR_DATASET_ID --path ./csvs`
-- scp to your local device: **from your local device,** `scp -r USERNAME@scarcity-submit.glbrc.org:/home/GLBRCORG/username/my_experiment/csvs/ .` (copies `csvs` folder from Scarcity to your current directory)
+- scp to your local device: **from your local device,** `scp -r USERNAME@scarcity-submit.glbrc.org:/home/GLBRCORG/username/my_experiment/ .` (copies entire run folder from Scarcity to your current directory)
 
 ### STEP 8
 Publish CNS
@@ -102,12 +117,17 @@ Initial scripts and framework are based on work from Anthony Meger, modified by 
 
 ## Changelog
 
-### Version 10.2 — 10/19/2026
+### Version 11 — 10/19/2026
+- Reworked file organization esp. for large files:
+  - `Fastq/` directory is not modified anymore, input files aren't moved into subdirectories
+  - Intermediate files go in `work/<sample>/`; results go in `csvs/{good_reads,poor_reads,info}/`; logs go in `logs/`
+  - `space_saver` param deletes each sample's `work/` dir on success and gzips `poor_reads`
+- Reads are now streamed straight into the quality filtering script so `combined.fastq` is no longer written
+- Removed `get_stats.sh`, read counting is now in `merge_reads.sh`
+- New `perl_filepath` param (needed for fast R2 reverse-complementing when `merge=FALSE`)
 - New quality-filtering params `end_slop` and `trim_slop`: exempt (and optionally trim) N bases at sequencing-read 5' ends from filtering
   - Useful for position-dependent N's in sequencing data due to sequencer focusing during first few cycles
 - For `merge=FALSE` runs, fastqs are no longer decompressed, input is streamed with `zcat -f` instead.
-
-### Version 10.1 — 10/19/2026
 - Updates related to single-end mode:
   - Fixed bug where R2 files weren't detected
   - R2 gets reverse-complemented in single-end mode

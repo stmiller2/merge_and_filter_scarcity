@@ -138,8 +138,11 @@ for i in "${sample_names_array[@]}"; do
         failed_samples+=("$i"); continue
     fi
 
-    # Merge or concatenate reads
+    # Merge or concatenate reads.
+    # qf_ends tells QF3 which side(s) of the final read are sequencing-read 5'
+    # ends, where end_slop applies (L = left, R = right, LR = both).
     if [ "$merge" == "TRUE" ]; then
+        qf_ends="LR"    # PEAR output: R1 5' end on left, revcomp'd R2 5' end on right
         log start "MERGING PAIRED-END READS"
         pear_output=$("${pear_filepath}" -f *_R1_001.fastq.gz -r *_R2_001.fastq.gz -o combined \
             -y "${memory}" -j "${cpus}" -v "${pear_overlap}" -g "${pear_stattest}" -p "${pear_pvalue}" 2>&1)
@@ -153,6 +156,7 @@ for i in "${sample_names_array[@]}"; do
         log stop "READS MERGED"
         format_reads combined.assembled.fastq || { failed_samples+=("$i"); continue; }
     elif [ "$singleend" == "FALSE" ]; then
+        qf_ends="LR"    # R1 + revcomp(R2): 5' ends on both outer edges, 3' ends at the junction
         log start "CREATING REVERSE COMPLEMENT OF READ 2"
         if ! revcomp_fastq R2_rc.fastq *_R2_001.fastq; then
             echo "ERROR: reverse-complement step failed for sample ${i}, skipping."
@@ -190,6 +194,7 @@ for i in "${sample_names_array[@]}"; do
             echo "ERROR: sample ${i} has both R1 and R2 fastq files in single-end mode, skipping."
             failed_samples+=("$i"); continue
         elif [ "${#r2_files[@]}" -gt 0 ]; then
+            qf_ends="R"     # revcomp'd R2: its 5' end is now on the right
             log start "SINGLE-END READ 2: CREATING REVERSE COMPLEMENT"
             if ! revcomp_fastq R2_rc.fastq "${r2_files[@]}"; then
                 echo "ERROR: reverse-complement step failed for sample ${i}, skipping."
@@ -199,6 +204,7 @@ for i in "${sample_names_array[@]}"; do
             format_reads R2_rc.fastq || { failed_samples+=("$i"); continue; }
             rm -f R2_rc.fastq
         else
+            qf_ends="L"     # R1 as sequenced: 5' end on the left
             format_reads "${r1_files[@]}" || { failed_samples+=("$i"); continue; }
         fi
     fi
@@ -209,7 +215,7 @@ for i in "${sample_names_array[@]}"; do
         failed_samples+=("$i"); continue
     fi
     log start "FILTERING FOR HIGH QUALITY READS"
-    if ! ./QF3.out; then
+    if ! ./QF3.out "$qf_ends"; then
         echo "ERROR: quality filtering failed for sample ${i} (missing/empty combined.fastq?), skipping."
         rm -f QF3.out
         failed_samples+=("$i"); continue

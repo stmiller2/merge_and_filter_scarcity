@@ -85,6 +85,8 @@ echo "Disk                : ${disk:-}"
 echo "Q Floor             : ${q_floor:-}"
 echo "Q Cutoff            : ${q_cutoff:-}"
 echo "Cutoff Percent      : ${cutoff_pct:-}"
+echo "End Slop            : ${end_slop:-}"
+echo "Trim Slop           : ${trim_slop:-}"
 echo "Sample Names        : ${detected_samples_str} (auto-detected from Fastq/)"
 echo "Reorganize          : ${reorganize:-}"
 echo "Notify Email        : ${notify_email:-(none - notifications disabled)}"
@@ -147,6 +149,21 @@ check_positive_int q_cutoff "${q_cutoff:-}"
 
 if ! [[ "${cutoff_pct:-}" =~ ^[0-1](\.[0-9]+)?$ ]]; then
     preflight_errors+=("cutoff_pct should be a decimal between 0 and 1 (got '${cutoff_pct:-}').")
+fi
+
+# end_slop: FALSE or a non-negative integer. FALSE is passed to QF3 as 0.
+if [[ "${end_slop:-}" == "FALSE" ]]; then
+    end_slop_value=0
+elif [[ "${end_slop:-}" =~ ^[0-9]+$ ]]; then
+    end_slop_value=$((10#${end_slop}))
+else
+    preflight_errors+=("Parameter 'end_slop' must be FALSE or a non-negative integer (got '${end_slop:-}').")
+fi
+check_true_false trim_slop "${trim_slop:-}"
+if [[ "${trim_slop:-}" == "TRUE" ]]; then
+    trim_slop_value=true
+else
+    trim_slop_value=false
 fi
 
 if [[ "${merge:-}" == "TRUE" ]]; then
@@ -235,6 +252,8 @@ fi
 sed -e "s/{{Q_FLOOR}}/$q_floor/" \
     -e "s/{{Q_CUTOFF}}/$q_cutoff/" \
     -e "s/{{CUTOFF_PCT}}/$cutoff_pct/" \
+    -e "s/{{END_SLOP}}/$end_slop_value/" \
+    -e "s/{{TRIM_SLOP}}/$trim_slop_value/" \
     QF3_template.cpp > QF3.cpp
 
 # Compile the quality filtering script (static compiling allows this to run through a cluster job)

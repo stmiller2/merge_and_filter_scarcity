@@ -67,10 +67,10 @@ vi params.env
 | q_floor           | int        | Reads with any bases below this value are discarded |
 | q_cutoff          | int        | Reads with too many bases below this value are discarded (see cutoff_pct) |
 | cutoff_pct        | float      | Proportion of bases that must be at or above q_cutoff for a read to be kept |
-| end_slop          | int or FALSE | Number of bases at each sequencing-read **5' end** exempt from quality filtering (early-cycle low quality). Recommend `FALSE` unless necessary (check fastqs for early single-position N's) |
-| trim_slop         | TRUE/FALSE | If TRUE, the end_slop bases are removed from output sequences (recommended). If FALSE, they are kept in the output but still not filtered |
+| end_slop          | int or FALSE | Number of bases at each sequencing-read **5' end** exempt from quality filtering (early-cycle low quality). Never applied to 3' ends: applied to both ends of merged/concatenated paired-end reads, the left end of single-end R1, and the right end of single-end R2 (after reverse-complementing). `FALSE` disables. Reads with nothing left after removing slop go to `poor_reads.csv` as `E3` |
+| trim_slop         | TRUE/FALSE | If TRUE, the end_slop bases are removed from output sequences (**recommended**). If FALSE, they are kept in the output but still not filtered. Ignored when end_slop=FALSE |
 | reorganize        | TRUE/FALSE | If TRUE, all final `good_reads.csv` files (and others) will be reorganized into a single directory (recommended) |
-| notify_email      | email      | Optional. If set, HTCondor emails this address if the job errors out. Leave blank to disable |
+| notify_email      | email      | Optional. If set, HTCondor emails this address if the job errors out. Leave blank to disable. |
 
 ### STEP 5 — Start processing 
 ```
@@ -102,19 +102,17 @@ Initial scripts and framework are based on work from Anthony Meger, modified by 
 
 ## Changelog
 
-### Version 10.2 - 10/19/2026
-- New quality-filtering params `end_slop` and `trim_slop`: exempt (and optionally trim) N bases at sequencing-read 5' ends from filtering 
-  - The percentage of bases ≥ `q_cutoff` is now computed over the checked bases only 
-  - New `E3` poor-read code for reads too short to filter after slop removal
-
+### Version 10.2 — 10/19/2026
+- New quality-filtering params `end_slop` and `trim_slop`: exempt (and optionally trim) N bases at sequencing-read 5' ends from filtering
+  - Useful for position-dependent N's in sequencing data due to sequencer focusing during first few cycles
+- For `merge=FALSE` runs, fastqs are no longer decompressed, input is streamed with `zcat -f` instead.
 
 ### Version 10.1 — 10/19/2026
 - Updates related to single-end mode:
   - Fixed bug where R2 files weren't detected
   - R2 gets reverse-complemented in single-end mode
   - Preflight checks give an error if both R1 and R2 are provided when `singleend=TRUE`
-- Added console messages for local tasks (e.g., decompressing .gz files before `merge=FALSE` runs, which takes a few minutes)
-- Tightened filename matching so samples sharing a name prefix (e.g. `A` and `A_2`) no longer pick up each other's files
+- Improved filename matching so samples with shared prefix (e.g. `A` and `A_2`) don't collide
 
 ### Version 10 — 09/16/2026
 - Ported the pipeline from BCC to **Scarcity**. Core logic is the same with the following changes:

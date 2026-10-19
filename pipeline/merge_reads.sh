@@ -73,7 +73,7 @@ log() {
 # Function to format reads. Accepts one or more input files (e.g. sample split across lanes)
 format_reads() {
     echo -e "\n$(date '+%I:%M%p') -- FORMATTING READS"
-    if ! cat -- "$@" | paste -d '\t' - - - - | awk -F '\t' '{print $2, $4}' > combined.fastq; then
+    if ! zcat -f -- "$@" | paste -d '\t' - - - - | awk -F '\t' '{print $2, $4}' > combined.fastq; then
         echo -e "$(date '+%I:%M%p') -- ERROR: failed to format reads"
         return 1
     fi
@@ -93,7 +93,7 @@ find_sample_fastqs() {
 # Reverse-complement one or more fastq files into $1 (quality strings reversed too).
 revcomp_fastq() {
     local out="$1"; shift
-    if ! cat -- "$@" | paste -d '\t' - - - - > rc.4col.tsv; then
+    if ! zcat -f -- "$@" | paste -d '\t' - - - - > rc.4col.tsv; then
         rm -f rc.4col.tsv
         return 1
     fi
@@ -127,6 +127,13 @@ for i in "${sample_names_array[@]}"; do
     # (keeps the pipeline safely re-runnable).
     find_sample_fastqs "$i" ..
     if [ "${#sample_fastqs[@]}" -gt 0 ]; then
+        # Inputs may be symlinks (e.g. Data Catalog pulls). A relative link would
+        # break when moved down a directory, so repoint those to absolute targets.
+        for f in "${sample_fastqs[@]}"; do
+            if [[ -L "$f" && "$(readlink -- "$f")" != /* ]]; then
+                ln -sfn -- "$(readlink -f -- "$f")" "$f"
+            fi
+        done
         if ! mv -- "${sample_fastqs[@]}" .; then
             echo "ERROR: failed to move input files for sample ${i}, skipping."
             failed_samples+=("$i"); continue
@@ -138,13 +145,20 @@ for i in "${sample_names_array[@]}"; do
         failed_samples+=("$i"); continue
     fi
 
+    # Split by read (multiple lanes of the same read are concatenated downstream).
+    # Files may be .fastq.gz or plain .fastq (e.g. decompressed by an older version).
+    r1_files=(); r2_files=()
+    for f in "${sample_fastqs[@]}"; do
+        if [[ "$f" == *_R2_001.fastq* ]]; then r2_files+=("$f"); else r1_files+=("$f"); fi
+    done
+
     # Merge or concatenate reads.
     # qf_ends tells QF3 which side(s) of the final read are sequencing-read 5'
     # ends, where end_slop applies (L = left, R = right, LR = both).
     if [ "$merge" == "TRUE" ]; then
         qf_ends="LR"    # PEAR output: R1 5' end on left, revcomp'd R2 5' end on right
         log start "MERGING PAIRED-END READS"
-        pear_output=$("${pear_filepath}" -f *_R1_001.fastq.gz -r *_R2_001.fastq.gz -o combined \
+        pear_output=$("${pear_filepath}" -f "${r1_files[@]}" -r "${r2_files[@]}" -o combined \
             -y "${memory}" -j "${cpus}" -v "${pear_overlap}" -g "${pear_stattest}" -p "${pear_pvalue}" 2>&1)
         pear_status=$?
         echo "$pear_output" | grep -E -m 3 "Assembled reads|Discarded reads|Not assembled reads" | awk 'NF' | sed 's/^/           /'
@@ -158,13 +172,13 @@ for i in "${sample_names_array[@]}"; do
     elif [ "$singleend" == "FALSE" ]; then
         qf_ends="LR"    # R1 + revcomp(R2): 5' ends on both outer edges, 3' ends at the junction
         log start "CREATING REVERSE COMPLEMENT OF READ 2"
-        if ! revcomp_fastq R2_rc.fastq *_R2_001.fastq; then
+        if ! revcomp_fastq R2_rc.fastq "${r2_files[@]}"; then
             echo "ERROR: reverse-complement step failed for sample ${i}, skipping."
             failed_samples+=("$i"); continue
         fi
         log stop "REVERSE COMPLEMENTED"
         log start "CONCATENATING PAIRED-END READS"
-        if ! paste -d "" *_R1_001.fastq R2_rc.fastq > combined.assembled.fastq; then
+        if ! paste -d "" <(zcat -f -- "${r1_files[@]}") R2_rc.fastq > combined.assembled.fastq; then
             echo "ERROR: concatenation step failed for sample ${i}, skipping."
             failed_samples+=("$i"); continue
         fi
@@ -172,24 +186,7 @@ for i in "${sample_names_array[@]}"; do
         format_reads combined.assembled.fastq || { failed_samples+=("$i"); continue; }
         rm -f R2_rc.fastq
     else
-        # Single-end. Decompress any .gz left in Fastq/<sample>/ by an earlier
-        # merge=TRUE run (process_ngs.sh only gunzips top-level Fastq/).
-        gz_files=()
-        for f in "${sample_fastqs[@]}"; do
-            [[ "$f" == *.gz ]] && gz_files+=("$f")
-        done
-        if [ "${#gz_files[@]}" -gt 0 ] && ! gunzip -f -- "${gz_files[@]}"; then
-            echo "ERROR: failed to decompress fastq files for sample ${i}, skipping."
-            failed_samples+=("$i"); continue
-        fi
-        find_sample_fastqs "$i" .
-
-        # Split by read (multiple lanes of the same read are concatenated).
-        r1_files=(); r2_files=()
-        for f in "${sample_fastqs[@]}"; do
-            if [[ "$f" == *_R2_001.fastq ]]; then r2_files+=("$f"); else r1_files+=("$f"); fi
-        done
-
+        # Single-end
         if [ "${#r1_files[@]}" -gt 0 ] && [ "${#r2_files[@]}" -gt 0 ]; then
             echo "ERROR: sample ${i} has both R1 and R2 fastq files in single-end mode, skipping."
             failed_samples+=("$i"); continue

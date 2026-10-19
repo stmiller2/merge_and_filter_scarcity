@@ -224,22 +224,6 @@ fi
 
 echo "Preflight validation passed."
 
-# -----------------------------------------------------------------------------
-# Decompress fastqs when the downstream steps need plain-text input.
-# -----------------------------------------------------------------------------
-if [[ "$merge" == "FALSE" || "$singleend" == "TRUE" ]]; then
-    cd "${data_filepath}/Fastq"
-    if compgen -G "*.fastq.gz" > /dev/null 2>&1; then
-        gz_count=$(compgen -G "*.fastq.gz" | wc -l)
-        echo "Decompressing ${gz_count} fastq.gz file(s) locally before submission. This can take several minutes for large runs..."
-        # -f is required here, not just a nice-to-have: files pulled from the
-        # GLBRC Data Catalog via `datasync files pull` land as symlinks, and
-        # gunzip can refuse/misbehave on a symlinked source without -f.
-        gunzip -f -- *.fastq.gz
-        echo "Decompression complete."
-    fi
-fi
-
 cd "${data_filepath}/pipeline"
 
 # Make merge_reads.sh executable

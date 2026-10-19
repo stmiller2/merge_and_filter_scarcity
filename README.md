@@ -99,7 +99,8 @@ Initial scripts and framework are based on work from Anthony Meger, modified by 
 - Updates related to single-end mode:
   - Fixed bug where R2 files weren't detected
   - R2 gets reverse-complemented in single-end mode
-  - Preflight checks give an error if both R1 and R2 are provided when singleend=TRUE
+  - Preflight checks give an error if both R1 and R2 are provided when `singleend=TRUE`
+- Added console messages for local tasks (e.g., decompressing .gz files before `merge=FALSE` runs, which takes a few minutes)
 
 ### Version 10 — 09/16/2026
 - Ported the pipeline from BCC to **Scarcity**. Core logic is the same with the following changes:

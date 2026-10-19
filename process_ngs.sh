@@ -213,10 +213,13 @@ echo "Preflight validation passed."
 if [[ "$merge" == "FALSE" || "$singleend" == "TRUE" ]]; then
     cd "${data_filepath}/Fastq"
     if compgen -G "*.fastq.gz" > /dev/null 2>&1; then
+        gz_count=$(compgen -G "*.fastq.gz" | wc -l)
+        echo "Decompressing ${gz_count} fastq.gz file(s) locally before submission. This can take several minutes for large runs..."
         # -f is required here, not just a nice-to-have: files pulled from the
         # GLBRC Data Catalog via `datasync files pull` land as symlinks, and
         # gunzip can refuse/misbehave on a symlinked source without -f.
         gunzip -f -- *.fastq.gz
+        echo "Decompression complete."
     fi
 fi
 
@@ -235,6 +238,7 @@ sed -e "s/{{Q_FLOOR}}/$q_floor/" \
     QF3_template.cpp > QF3.cpp
 
 # Compile the quality filtering script (static compiling allows this to run through a cluster job)
+echo "Compiling quality filter (QF3)..."
 if ! "${compiler_filepath}" -static-libstdc++ -o QF3.out QF3.cpp; then
     echo "Error: compilation of QF3.cpp failed. Check that compiler_filepath ('${compiler_filepath}') is a working g++ executable." >&2
     exit 1

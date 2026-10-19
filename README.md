@@ -16,9 +16,12 @@ ssh YOUR_USERNAME@scarcity-submit.glbrc.org
 You'll land in your home directory, `/home/GLBRCORG/YOUR_USERNAME`.
 
 ### STEP 2 — Clone the pipeline
-Within your home directory:
+Within your home directory, clone the pipeline:
 ```
 git clone https://github.com/stmiller2/merge_and_filter_scarcity
+```
+and rename if desired:
+```
 mv merge_and_filter_scarcity/ my_experiment/
 cd my_experiment
 ```

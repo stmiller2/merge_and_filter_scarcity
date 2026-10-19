@@ -1,5 +1,7 @@
 #!/bin/bash
 set -euo pipefail
+# extglob must be enabled before the functions that use +(...)/?(...) are parsed
+shopt -s extglob
 
 # Check if the correct number of arguments is provided
 if [ "$#" -ne 1 ]; then
@@ -28,17 +30,32 @@ derive_sample_names() {
     local f base
     local -a names=()
     shopt -s nullglob
-    for f in "${fastq_dir}"/*_S[0-9]*_R1_001.fastq.gz \
-             "${fastq_dir}"/*_S[0-9]*_R1_001.fastq \
-             "${fastq_dir}"/*/*_S[0-9]*_R1_001.fastq.gz \
-             "${fastq_dir}"/*/*_S[0-9]*_R1_001.fastq; do
+    # Match R1 or R2 so single-end runs on R2-only data are detected too.
+    for f in "${fastq_dir}"/*_S[0-9]*_R[12]_001.fastq.gz \
+             "${fastq_dir}"/*_S[0-9]*_R[12]_001.fastq \
+             "${fastq_dir}"/*/*_S[0-9]*_R[12]_001.fastq.gz \
+             "${fastq_dir}"/*/*_S[0-9]*_R[12]_001.fastq; do
         base=$(basename "$f")
-        base="${base%_S[0-9]*_R1_001.fastq.gz}"
-        base="${base%_S[0-9]*_R1_001.fastq}"
+        base="${base%_S[0-9]*_R[12]_001.fastq.gz}"
+        base="${base%_S[0-9]*_R[12]_001.fastq}"
         names+=("$base")
     done
     shopt -u nullglob
+    [[ "${#names[@]}" -gt 0 ]] || return 0
     printf '%s\n' "${names[@]}" | awk 'NF && !seen[$0]++'
+}
+
+# True if sample $1 has a read-$2 (R1 or R2) fastq in Fastq/ or Fastq/<sample>/.
+# Strict pattern: {sample}_S{digits}[_L{digits}]_R{1|2}_001.fastq[.gz], so
+# sample 'A' does not pick up files belonging to sample 'A_2'.
+has_read() {
+    local s="$1" r="$2"
+    local -a hits
+    shopt -s nullglob
+    hits=( "${data_filepath}/Fastq/${s}"_S+([0-9])?(_L+([0-9]))_${r}_001.fastq?(.gz) \
+           "${data_filepath}/Fastq/${s}/${s}"_S+([0-9])?(_L+([0-9]))_${r}_001.fastq?(.gz) )
+    shopt -u nullglob
+    [[ "${#hits[@]}" -gt 0 ]]
 }
 
 sample_names_array=()
@@ -154,18 +171,25 @@ if [[ -n "${notify_email:-}" && ! "${notify_email}" =~ ^[^[:space:]@]+@[^[:space
 fi
 
 if [[ "${#sample_names_array[@]}" -eq 0 ]]; then
-    preflight_errors+=("No sample fastq files found in '${data_filepath:-}/Fastq'. Expected names like {sample}_S{#}_R1_001.fastq.gz (a _L001_-style lane segment before _R1_/_R2_ is also fine, but not required).")
+    preflight_errors+=("No sample fastq files found in '${data_filepath:-}/Fastq'. Expected names like {sample}_S{#}_R1_001.fastq.gz or _R2_001.fastq.gz (a _L001_-style lane segment before _R1_/_R2_ is also fine, but not required).")
 else
     for s in "${sample_names_array[@]}"; do
-        # Check top-level Fastq/ (compressed or already-decompressed from a
-        # previous run) and Fastq/<sample>/ (already moved by merge_reads.sh).
-        if ! compgen -G "${data_filepath}/Fastq/${s}_S[0-9]*_R1_001.fastq*" > /dev/null 2>&1 \
-           && ! compgen -G "${data_filepath}/Fastq/${s}/${s}_S[0-9]*_R1_001.fastq*" > /dev/null 2>&1; then
-            preflight_errors+=("Sample '${s}': R1 fastq file not found.")
-        fi
-        if [[ "${merge:-}" == "TRUE" || "${singleend:-}" == "FALSE" ]]; then
-            if ! compgen -G "${data_filepath}/Fastq/${s}_S[0-9]*_R2_001.fastq*" > /dev/null 2>&1 \
-               && ! compgen -G "${data_filepath}/Fastq/${s}/${s}_S[0-9]*_R2_001.fastq*" > /dev/null 2>&1; then
+        # has_read checks top-level Fastq/ (compressed or already-decompressed
+        # from a previous run) and Fastq/<sample>/ (already moved by merge_reads.sh).
+        if [[ "${singleend:-}" == "TRUE" && "${merge:-}" != "TRUE" ]]; then
+            # Single-end: exactly one of R1 or R2 (multiple lanes of the same
+            # read are fine; they are concatenated downstream).
+            if ! has_read "$s" R1 && ! has_read "$s" R2; then
+                preflight_errors+=("Sample '${s}': single-end run but neither an R1 nor an R2 fastq file was found.")
+            elif has_read "$s" R1 && has_read "$s" R2; then
+                preflight_errors+=("Sample '${s}': single-end run but both R1 and R2 fastq files are present. Remove the read you don't want to analyze from Fastq/ (and Fastq/${s}/ if a previous run moved files there).")
+            fi
+        else
+            # Paired-end (or merge): both reads required.
+            if ! has_read "$s" R1; then
+                preflight_errors+=("Sample '${s}': paired-end run but R1 fastq file not found.")
+            fi
+            if ! has_read "$s" R2; then
                 preflight_errors+=("Sample '${s}': paired-end run but R2 fastq file not found.")
             fi
         fi

@@ -1,5 +1,7 @@
 #!/bin/bash
 set -uo pipefail
+# extglob must be enabled before the functions that use +(...)/?(...) are parsed
+shopt -s extglob
 # NOTE: -e is intentionally NOT set here. Failures are checked explicitly at
 # each step so that one bad sample can be logged and skipped (via `continue`)
 # without aborting the whole batch run.
@@ -35,22 +37,24 @@ derive_sample_names() {
     local f base
     local -a names=()
     shopt -s nullglob
-    for f in "${fastq_dir}"/*_S[0-9]*_R1_001.fastq.gz \
-             "${fastq_dir}"/*_S[0-9]*_R1_001.fastq \
-             "${fastq_dir}"/*/*_S[0-9]*_R1_001.fastq.gz \
-             "${fastq_dir}"/*/*_S[0-9]*_R1_001.fastq; do
+    # Match R1 or R2 so single-end runs on R2-only data are detected too.
+    for f in "${fastq_dir}"/*_S[0-9]*_R[12]_001.fastq.gz \
+             "${fastq_dir}"/*_S[0-9]*_R[12]_001.fastq \
+             "${fastq_dir}"/*/*_S[0-9]*_R[12]_001.fastq.gz \
+             "${fastq_dir}"/*/*_S[0-9]*_R[12]_001.fastq; do
         base=$(basename "$f")
-        base="${base%_S[0-9]*_R1_001.fastq.gz}"
-        base="${base%_S[0-9]*_R1_001.fastq}"
+        base="${base%_S[0-9]*_R[12]_001.fastq.gz}"
+        base="${base%_S[0-9]*_R[12]_001.fastq}"
         names+=("$base")
     done
     shopt -u nullglob
+    [[ "${#names[@]}" -gt 0 ]] || return 0
     printf '%s\n' "${names[@]}" | awk 'NF && !seen[$0]++'
 }
 
 mapfile -t sample_names_array < <(derive_sample_names "${data_filepath}/Fastq")
 if [ "${#sample_names_array[@]}" -eq 0 ]; then
-    echo "Error: no fastq files found in ${data_filepath}/Fastq matching {sample}_S{#}_R1_001.fastq[.gz] (with or without a _L001_-style lane segment)."
+    echo "Error: no fastq files found in ${data_filepath}/Fastq matching {sample}_S{#}_R[12]_001.fastq[.gz] (with or without a _L001_-style lane segment)."
     exit 1
 fi
 echo "Detected samples: ${sample_names_array[*]}"
@@ -76,6 +80,34 @@ format_reads() {
     echo -e "$(date '+%I:%M%p') -- READS FORMATTED"
 }
 
+# Collect sample $1's fastqs in directory $2 into the array sample_fastqs.
+# Strict pattern: {sample}_S{digits}[_L{digits}]_R{1|2}_001.fastq[.gz], so
+# sample 'A' does not pick up files belonging to sample 'A_2'.
+find_sample_fastqs() {
+    local s="$1" dir="$2"
+    shopt -s nullglob
+    sample_fastqs=( "${dir}/${s}"_S+([0-9])?(_L+([0-9]))_R[12]_001.fastq?(.gz) )
+    shopt -u nullglob
+}
+
+# Reverse-complement one or more fastq files into $1 (quality strings reversed too).
+revcomp_fastq() {
+    local out="$1"; shift
+    if ! cat -- "$@" | paste -d '\t' - - - - > rc.4col.tsv; then
+        rm -f rc.4col.tsv
+        return 1
+    fi
+    paste -d '\t' \
+        <(cut -f1 rc.4col.tsv) \
+        <(cut -f2 rc.4col.tsv | rev | tr 'ACGTNacgtn' 'TGCANTGCAN') \
+        <(cut -f3 rc.4col.tsv) \
+        <(cut -f4 rc.4col.tsv | rev) \
+        | tr '\t' '\n' > "$out"
+    local status=$?
+    rm -f rc.4col.tsv
+    return $status
+}
+
 failed_samples=()
 
 # Iterate through samples
@@ -93,12 +125,15 @@ for i in "${sample_names_array[@]}"; do
 
     # Move this sample's input files in, unless a previous run already did so
     # (keeps the pipeline safely re-runnable).
-    if compgen -G "../${i}_"* > /dev/null 2>&1; then
-        if ! mv ../"${i}"_* .; then
+    find_sample_fastqs "$i" ..
+    if [ "${#sample_fastqs[@]}" -gt 0 ]; then
+        if ! mv -- "${sample_fastqs[@]}" .; then
             echo "ERROR: failed to move input files for sample ${i}, skipping."
             failed_samples+=("$i"); continue
         fi
-    elif ! compgen -G "${i}_"* > /dev/null 2>&1; then
+    fi
+    find_sample_fastqs "$i" .
+    if [ "${#sample_fastqs[@]}" -eq 0 ]; then
         echo "ERROR: no input files found for sample ${i} (checked Fastq/ and Fastq/${i}/), skipping."
         failed_samples+=("$i"); continue
     fi
@@ -119,21 +154,10 @@ for i in "${sample_names_array[@]}"; do
         format_reads combined.assembled.fastq || { failed_samples+=("$i"); continue; }
     elif [ "$singleend" == "FALSE" ]; then
         log start "CREATING REVERSE COMPLEMENT OF READ 2"
-        if ! paste -d '\t' - - - - < *_R2_001.fastq > R2.4col.tsv; then
-            echo "ERROR: reshaping R2 fastq failed for sample ${i}, skipping."
-            failed_samples+=("$i"); continue
-        fi
-        if ! paste -d '\t' \
-                <(cut -f1 R2.4col.tsv) \
-                <(cut -f2 R2.4col.tsv | rev | tr 'ACGTNacgtn' 'TGCANTGCAN') \
-                <(cut -f3 R2.4col.tsv) \
-                <(cut -f4 R2.4col.tsv | rev) \
-            | tr '\t' '\n' > R2_rc.fastq; then
+        if ! revcomp_fastq R2_rc.fastq *_R2_001.fastq; then
             echo "ERROR: reverse-complement step failed for sample ${i}, skipping."
-            rm -f R2.4col.tsv
             failed_samples+=("$i"); continue
         fi
-        rm -f R2.4col.tsv
         log stop "REVERSE COMPLEMENTED"
         log start "CONCATENATING PAIRED-END READS"
         if ! paste -d "" *_R1_001.fastq R2_rc.fastq > combined.assembled.fastq; then
@@ -144,7 +168,39 @@ for i in "${sample_names_array[@]}"; do
         format_reads combined.assembled.fastq || { failed_samples+=("$i"); continue; }
         rm -f R2_rc.fastq
     else
-        format_reads "${i}"_* || { failed_samples+=("$i"); continue; }
+        # Single-end. Decompress any .gz left in Fastq/<sample>/ by an earlier
+        # merge=TRUE run (process_ngs.sh only gunzips top-level Fastq/).
+        gz_files=()
+        for f in "${sample_fastqs[@]}"; do
+            [[ "$f" == *.gz ]] && gz_files+=("$f")
+        done
+        if [ "${#gz_files[@]}" -gt 0 ] && ! gunzip -f -- "${gz_files[@]}"; then
+            echo "ERROR: failed to decompress fastq files for sample ${i}, skipping."
+            failed_samples+=("$i"); continue
+        fi
+        find_sample_fastqs "$i" .
+
+        # Split by read (multiple lanes of the same read are concatenated).
+        r1_files=(); r2_files=()
+        for f in "${sample_fastqs[@]}"; do
+            if [[ "$f" == *_R2_001.fastq ]]; then r2_files+=("$f"); else r1_files+=("$f"); fi
+        done
+
+        if [ "${#r1_files[@]}" -gt 0 ] && [ "${#r2_files[@]}" -gt 0 ]; then
+            echo "ERROR: sample ${i} has both R1 and R2 fastq files in single-end mode, skipping."
+            failed_samples+=("$i"); continue
+        elif [ "${#r2_files[@]}" -gt 0 ]; then
+            log start "SINGLE-END READ 2: CREATING REVERSE COMPLEMENT"
+            if ! revcomp_fastq R2_rc.fastq "${r2_files[@]}"; then
+                echo "ERROR: reverse-complement step failed for sample ${i}, skipping."
+                failed_samples+=("$i"); continue
+            fi
+            log stop "REVERSE COMPLEMENTED"
+            format_reads R2_rc.fastq || { failed_samples+=("$i"); continue; }
+            rm -f R2_rc.fastq
+        else
+            format_reads "${r1_files[@]}" || { failed_samples+=("$i"); continue; }
+        fi
     fi
 
     # Quality filtering

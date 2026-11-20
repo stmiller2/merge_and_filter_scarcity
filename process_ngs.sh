@@ -20,6 +20,13 @@ fi
 # Get parameters from params file
 source "$params_file"
 
+# The pipeline directory is the folder containing this script (not set in
+# params.env). A data_filepath line left in an older params file is ignored.
+pipeline_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${data_filepath:-}" ]]; then
+    echo "Note: data_filepath in '${params_file}' is no longer used; using the script's folder (${pipeline_dir})." >&2
+fi
+
 # -----------------------------------------------------------------------------
 # Derive sample names from Fastq/ filenames 
 # Expected naming convention (see README):
@@ -50,14 +57,14 @@ count_reads() {
     local s="$1" r="$2"
     local -a hits
     shopt -s nullglob
-    hits=( "${data_filepath}/Fastq/${s}"_S+([0-9])?(_L+([0-9]))_${r}_001.fastq?(.gz) )
+    hits=( "${pipeline_dir}/Fastq/${s}"_S+([0-9])?(_L+([0-9]))_${r}_001.fastq?(.gz) )
     shopt -u nullglob
     echo "${#hits[@]}"
 }
 
 sample_names_array=()
-if [[ -d "${data_filepath:-}/Fastq" ]]; then
-    mapfile -t sample_names_array < <(derive_sample_names "${data_filepath}/Fastq")
+if [[ -d "${pipeline_dir}/Fastq" ]]; then
+    mapfile -t sample_names_array < <(derive_sample_names "${pipeline_dir}/Fastq")
 fi
 
 if [ "${#sample_names_array[@]}" -gt 0 ]; then
@@ -68,7 +75,7 @@ fi
 
 # Print parameters to the terminal
 echo "================ Parameter Settings ================"
-echo "Data Filepath       : ${data_filepath:-}"
+echo "Pipeline Directory  : ${pipeline_dir} (folder containing process_ngs.sh)"
 echo "Pear Filepath       : ${pear_filepath:-}"
 echo "Pear Overlap        : ${pear_overlap:-}"
 echo "Pear Stat Test      : ${pear_stattest:-}"
@@ -110,12 +117,13 @@ check_positive_int() {
     fi
 }
 
-if [[ -z "${data_filepath:-}" ]]; then
-    preflight_errors+=("data_filepath is not set.")
-elif [[ ! -d "$data_filepath" ]]; then
-    preflight_errors+=("data_filepath ('${data_filepath}') does not exist or is not a directory.")
-elif [[ ! -d "${data_filepath}/Fastq" ]]; then
-    preflight_errors+=("Fastq directory not found at '${data_filepath}/Fastq'.")
+if [[ ! -d "${pipeline_dir}/Fastq" ]]; then
+    preflight_errors+=("Fastq directory not found at '${pipeline_dir}/Fastq'.")
+fi
+# The path is substituted into the condor submit file with sed '|' delimiters
+# and condor splits arguments on whitespace, so neither may appear in it.
+if [[ "$pipeline_dir" =~ [[:space:]\|] ]]; then
+    preflight_errors+=("Pipeline directory path ('${pipeline_dir}') contains whitespace or '|', which HTCondor/sed can't handle. Move or rename the folder.")
 fi
 
 check_true_false merge "${merge:-}"
@@ -194,7 +202,7 @@ if [[ -n "${notify_email:-}" && ! "${notify_email}" =~ ^[^[:space:]@]+@[^[:space
 fi
 
 if [[ "${#sample_names_array[@]}" -eq 0 ]]; then
-    preflight_errors+=("No sample fastq files found in '${data_filepath:-}/Fastq'. Expected names like {sample}_S{#}_R1_001.fastq.gz or _R2_001.fastq.gz (a _L001_-style lane segment before _R1_/_R2_ is also fine, but not required).")
+    preflight_errors+=("No sample fastq files found in '${pipeline_dir}/Fastq'. Expected names like {sample}_S{#}_R1_001.fastq.gz or _R2_001.fastq.gz (a _L001_-style lane segment before _R1_/_R2_ is also fine, but not required).")
 else
     for s in "${sample_names_array[@]}"; do
         n_r1=$(count_reads "$s" R1)
@@ -235,13 +243,13 @@ echo "Preflight validation passed."
 
 # Logs directory, plus a snapshot of the params actually used. The job reads
 # the snapshot, so editing params.env after submitting doesn't affect this run.
-mkdir -p "${data_filepath}/logs"
-if ! cp -- "$params_file" "${data_filepath}/logs/params_used.env"; then
+mkdir -p "${pipeline_dir}/logs"
+if ! cp -- "$params_file" "${pipeline_dir}/logs/params_used.env"; then
     echo "Error: could not copy ${params_file} to logs/params_used.env." >&2
     exit 1
 fi
 
-cd "${data_filepath}/pipeline"
+cd "${pipeline_dir}/pipeline"
 
 # Make merge_reads.sh executable
 if ! chmod +x merge_reads.sh; then
@@ -273,11 +281,12 @@ else
     notify_user_value="$(whoami)" #harmless placeholder
 fi
 
-# Prepare condor submit file from template.
-sed -e "s|{{ARGS}}|${data_filepath}/logs/params_used.env|g" \
-    -e "s|{{INPUT_FILES}}|${data_filepath}/logs/params_used.env|g" \
-    -e "s|{{LOGDIR}}|${data_filepath}/logs|g" \
-    -e "s|{{INITIALDIR}}|${data_filepath}/pipeline|g" \
+# Prepare condor submit file from template. merge_reads.sh gets the params
+# snapshot and the pipeline directory as its two arguments.
+sed -e "s|{{ARGS}}|${pipeline_dir}/logs/params_used.env ${pipeline_dir}|g" \
+    -e "s|{{INPUT_FILES}}|${pipeline_dir}/logs/params_used.env|g" \
+    -e "s|{{LOGDIR}}|${pipeline_dir}/logs|g" \
+    -e "s|{{INITIALDIR}}|${pipeline_dir}/pipeline|g" \
     -e "s|{{CPUS}}|${cpus}|g" \
     -e "s|{{MEMORY}}|${memory}|g" \
     -e "s|{{DISK}}|${disk}|g" \

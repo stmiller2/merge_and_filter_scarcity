@@ -53,7 +53,6 @@ vi params.env
 
 | PARAMETER         | VALUE      | DESCRIPTION |
 |-------------------|------------|-------------|
-| data_filepath     | filepath   | Absolute path to this pipeline's directory, e.g. `/home/GLBRCORG/YOUR_USERNAME/my_experiment` |
 | pear_filepath     | filepath   | Path to the PEAR executable - `/mnt/cephfs/bifxapps/bin/pear` |
 | pear_overlap      | int        | Minimum overlap for merging (see PEAR docs) – suggest 10 |
 | pear_stattest     | int        | PEAR merging statistical test (see PEAR docs) – suggest 1 |
@@ -73,12 +72,28 @@ vi params.env
 | space_saver       | TRUE/FALSE | Deletes intermediate files (`work/<sample>/`) once run finishes and gzips `poor_reads` csvs |
 | notify_email      | email      | Optional. If set, HTCondor emails this address if the job errors out. Leave blank to disable. |
 
+### STEP 4b (optional) — Preview quality-filter settings
+Before submitting, you can estimate how `q_floor`, `q_cutoff` and `cutoff_pct` will affect read attrition:
+```
+chmod +x preview_filters.sh
+./preview_filters.sh params.env | less -R
+```
+This takes a random subsample of 100,000 reads (or pairs) from each sample. Merges/concatenates as described in your `params.env`, and applies the quality filtering script with every combination of q_floor 0–20 (step 2), q_cutoff 0–30 (step 5) and cutoff_pct 0.50–0.95 (step 0.05). It also does a run with whatever settings are currently set in `params.env`.  `merge`, `singleend`, `end_slop` and the PEAR settings come from `params.env`.
+
+Output is:
+- read fates at your current settings
+- a bar chart of E1 losses vs q_floor
+- one heatmap per q_cutoff of the % of reads kept
+- a per-sample table at your current settings
+
+Options: `-n N` reads to test on per sample, `-m M` only scan the first M reads of each file (faster for very large files, slightly less representative), `-s SAMPLE` one sample only, `-a` full tables for every sample, `--no-color`. The full report for every sample is saved to `logs/filter_preview.txt`, and the raw counts to `logs/filter_preview_grid.csv` / `logs/filter_preview_samples.csv`.
+
 ### STEP 5 — Start processing 
 ```
 chmod +x process_ngs.sh
 ./process_ngs.sh params.env
 ```
-Params will print to the console — double check everything is set correctly before it submits to the queue.
+Params will print to the console for double-checking at your leisure.
 
 ### STEP 6 — Monitor the run
 View a live-updating tail of the run progress with:
@@ -95,7 +110,7 @@ my_experiment/
 │   ├── good_reads/              good_reads_<sample>.csv
 │   ├── poor_reads/              poor_reads_<sample>.csv  (gzipped if space_saver)
 │   └── info/                    info_<sample>.csv  (read counts at each step)
-├── logs/                        run_progress.log, condor.{log,out,err}, params_used.env
+├── logs/                        run_progress.log, condor.{log,out,err}, params_used.env, filter_preview.* (if run)
 └── work/<sample>/               intermediate files; removed if space_saver (unless sample failed)
 ```
 
@@ -116,6 +131,11 @@ Publish CNS
 Initial scripts and framework are based on work from Anthony Meger, modified by me, and in many cases reviewed/updated by an LLM. I always carefully review LLM-generated code and take responsibility for the content here.
 
 ## Changelog
+
+### Version 12 — 11/20/2026
+- Removed `data_filepath` from params, this is now set automatically based on where the script is running from
+- Added a more complete run summary printout when the run finishes
+- Added `preview_filters.sh`, which does a parameter scan on quality filtering settings to help you decide where to set your quality filters before running the entire pipeline.
 
 ### Version 11 — 10/19/2026
 - Reworked file organization esp. for large files:

@@ -7,7 +7,7 @@ shopt -s extglob
 # without aborting the whole batch run.
 
 # -----------------------------------------------------------------------------
-# File layout (relative to data_filepath):
+# File layout (relative to pipeline_dir):
 #   Fastq/                 raw inputs; read-only to the pipeline
 #   work/<sample>/         per-sample scratch (PEAR output); deleted if space_saver=TRUE
 #   csvs/good_reads/       good_reads_<sample>.csv
@@ -17,28 +17,30 @@ shopt -s extglob
 # -----------------------------------------------------------------------------
 
 # Check for correct number of arguments
-if [ "$#" -ne 1 ]; then
-  echo "Usage: merge_reads.sh <params_file>"
+if [ "$#" -ne 2 ]; then
+  echo "Usage: merge_reads.sh <params_file> <pipeline_dir>"
   exit 1
 fi
 
-# Load parameters
+# Load parameters. pipeline_dir is passed in by process_ngs.sh (the folder it
+# was run from), not read from the params file.
 params_file="$1"
+pipeline_dir="$2"
 source "$params_file"
 
 # Start clock
 start_time=$(date --utc +%s)
 
 # Setup
-cd "${data_filepath}" || exit 1
-fastq_dir="${data_filepath}/Fastq"
-work_root="${data_filepath}/work"
-csv_dir="${data_filepath}/csvs"
-mkdir -p "${data_filepath}/logs"
-exec &> "${data_filepath}/logs/run_progress.log"
+cd "${pipeline_dir}" || exit 1
+fastq_dir="${pipeline_dir}/Fastq"
+work_root="${pipeline_dir}/work"
+csv_dir="${pipeline_dir}/csvs"
+mkdir -p "${pipeline_dir}/logs"
+exec &> "${pipeline_dir}/logs/run_progress.log"
 mkdir -p "${csv_dir}"/{good_reads,poor_reads,info} "${work_root}"
 
-qf3="${data_filepath}/pipeline/QF3.out"
+qf3="${pipeline_dir}/pipeline/QF3.out"
 if [ ! -x "$qf3" ]; then
     echo "Error: ${qf3} not found or not executable. Run process_ngs.sh to compile it."
     exit 1
@@ -152,15 +154,20 @@ revcomp_to_qf() {
 }
 
 # Count reads and write info.csv in the current (work) directory.
+# Also sets the globals n_total, n_unassembled, n_discarded, n_e1, n_e2, n_e3,
+# n_good for the end-of-run summary.
 write_stats() {
-    local f good poor total unassembled discarded pct
+    local f good poor total unassembled discarded pct poor_counts
     local -a needed=(good_reads.csv poor_reads.csv)
     [ "$merge" == "TRUE" ] && needed+=(combined.unassembled.forward.fastq combined.discarded.fastq)
     for f in "${needed[@]}"; do
         [ -f "$f" ] || { echo "ERROR: ${f} not found, cannot compute stats."; return 1; }
     done
     good=$(wc -l < good_reads.csv)
-    poor=$(wc -l < poor_reads.csv)
+    # One pass over poor_reads.csv: total lines plus counts per failure code (column 2)
+    poor_counts=$(awk -F, '{c[$2]++} END {printf "%d %d %d %d\n", NR, c["E1"], c["E2"], c["E3"]}' poor_reads.csv) ||
+        { echo "ERROR: could not count poor_reads.csv."; return 1; }
+    read -r poor n_e1 n_e2 n_e3 <<< "$poor_counts"
     if [ "$merge" == "TRUE" ]; then
         unassembled=$(( $(wc -l < combined.unassembled.forward.fastq) / 4 ))
         discarded=$(( $(wc -l < combined.discarded.fastq) / 4 ))
@@ -168,15 +175,94 @@ write_stats() {
         echo "total_reads,unassembled_reads,discarded_reads,poor_reads,good_reads" > info.csv
         echo "${total},${unassembled},${discarded},${poor},${good}" >> info.csv
     else
+        unassembled=0
+        discarded=0
         total=$((poor + good))
         echo "total_reads,poor_reads,good_reads" > info.csv
         echo "${total},${poor},${good}" >> info.csv
     fi
+    if [ "$poor" -ne $((n_e1 + n_e2 + n_e3)) ]; then
+        echo "WARNING: poor_reads.csv has $((poor - n_e1 - n_e2 - n_e3)) line(s) without an E1/E2/E3 code."
+    fi
+    n_total=$total; n_unassembled=$unassembled; n_discarded=$discarded; n_good=$good
     pct=$(awk -v g="$good" -v t="$total" 'BEGIN {printf "%.1f", (t > 0 ? 100 * g / t : 0)}')
     echo "           $(printf "%'d" "$good") / $(printf "%'d" "$total") reads passing all filters (${pct}%)"
 }
 
+# -----------------------------------------------------------------------------
+# End-of-run summary: where every input read ended up, per sample and overall
+# -----------------------------------------------------------------------------
+pct_of() {
+    awk -v n="$1" -v t="$2" 'BEGIN {printf "%.2f", (t > 0 ? 100 * n / t : 0)}'
+}
+
+# summary_line <label> <count> <total>
+summary_line() {
+    printf "  %-46s %15s  %6s%%\n" "$1" "$(printf "%'d" "$2")" "$(pct_of "$2" "$3")"
+}
+
+# summary_block <title> <total> <unassembled> <discarded> <e1> <e2> <e3> <good>
+summary_block() {
+    local title="$1" total="$2" unas="$3" disc="$4" e1="$5" e2="$6" e3="$7" good="$8"
+    echo ""
+    echo "${title}: $(printf "%'d" "$total") input reads"
+    summary_line "Good (passed all filters)" "$good" "$total"
+    if [ "$merge" == "TRUE" ]; then
+        summary_line "PEAR: not assembled" "$unas" "$total"
+        summary_line "PEAR: discarded" "$disc" "$total"
+    fi
+    summary_line "Poor E1: >=1 base below Q${q_floor}" "$e1" "$total"
+    summary_line "Poor E2: <=${cutoff_pct} of bases at >=Q${q_cutoff}" "$e2" "$total"
+    if [ "$slop_on" == "TRUE" ] || [ "$e3" -gt 0 ]; then
+        summary_line "Poor E3: too short after removing end slop" "$e3" "$total"
+    fi
+}
+
+print_run_summary() {
+    local row s total unas disc e1 e2 e3 good poor_ext
+    local sum_total=0 sum_unas=0 sum_disc=0 sum_e1=0 sum_e2=0 sum_e3=0 sum_good=0
+    slop_on=FALSE
+    if [[ "${end_slop:-FALSE}" =~ ^[0-9]+$ ]] && (( 10#${end_slop} > 0 )); then slop_on=TRUE; fi
+
+    echo -e "\n\033[1m$(printf %80s |tr " " "=")\033[0m"
+    echo -e "\033[1m$(printf %33s)RUN SUMMARY\033[0m"
+    echo -e "\033[1m$(printf %80s |tr " " "=")\033[0m"
+    echo "Percentages are of each sample's input reads (overall: of all input reads)."
+
+    if [ "${#summary_rows[@]}" -gt 0 ]; then
+        for row in "${summary_rows[@]}"; do
+            IFS=$'\t' read -r s total unas disc e1 e2 e3 good <<< "$row"
+            summary_block "Sample ${s}" "$total" "$unas" "$disc" "$e1" "$e2" "$e3" "$good"
+            sum_total=$((sum_total + total)); sum_unas=$((sum_unas + unas)); sum_disc=$((sum_disc + disc))
+            sum_e1=$((sum_e1 + e1)); sum_e2=$((sum_e2 + e2)); sum_e3=$((sum_e3 + e3)); sum_good=$((sum_good + good))
+        done
+        summary_block "OVERALL (${#summary_rows[@]} of ${#sample_names_array[@]} samples)" \
+            "$sum_total" "$sum_unas" "$sum_disc" "$sum_e1" "$sum_e2" "$sum_e3" "$sum_good"
+    else
+        echo -e "\nNo samples completed; nothing to summarize."
+    fi
+    if [ "${#failed_samples[@]}" -gt 0 ]; then
+        echo -e "\nFailed samples (not included above): ${failed_samples[*]}"
+    fi
+
+    [ "$space_saver" == "TRUE" ] && poor_ext="csv.gz" || poor_ext="csv"
+    echo -e "\nWhere these reads are:"
+    echo "  Good                 csvs/good_reads/good_reads_<sample>.csv"
+    echo "  Poor (E1/E2/E3)      csvs/poor_reads/poor_reads_<sample>.${poor_ext} (code in column 2)"
+    if [ "$merge" == "TRUE" ]; then
+        if [ "$space_saver" == "TRUE" ]; then
+            echo "  PEAR not assembled   deleted with work/<sample>/ (space_saver=TRUE)"
+            echo "  PEAR discarded       deleted with work/<sample>/ (space_saver=TRUE)"
+        else
+            echo "  PEAR not assembled   work/<sample>/combined.unassembled.{forward,reverse}.fastq"
+            echo "  PEAR discarded       work/<sample>/combined.discarded.fastq"
+        fi
+    fi
+    echo "  Per-sample counts    csvs/info/info_<sample>.csv"
+}
+
 failed_samples=()
+summary_rows=()
 
 # Iterate through samples
 for i in "${sample_names_array[@]}"; do
@@ -287,7 +373,7 @@ for i in "${sample_names_array[@]}"; do
     fi
 
     # Cleanup. Failed samples never reach this point, so their work/ dir is kept.
-    cd "${data_filepath}" || exit 1
+    cd "${pipeline_dir}" || exit 1
     if [ "$space_saver" == "TRUE" ]; then
         rm -rf -- "${work_dir}"
         log stop "SPACE SAVER: REMOVED work/${i}/"
@@ -295,12 +381,16 @@ for i in "${sample_names_array[@]}"; do
         rmdir -- "${work_dir}" 2> /dev/null || true    # only removed if empty (merge=FALSE modes)
     fi
 
+    summary_rows+=("$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$i" "$n_total" "$n_unassembled" "$n_discarded" "$n_e1" "$n_e2" "$n_e3" "$n_good")")
+
     echo -e "\nSAMPLE $i COMPLETE\n\n"
 done
 
 # Remove work/ if nothing is left in it
-cd "${data_filepath}" || exit 1
+cd "${pipeline_dir}" || exit 1
 rmdir -- "${work_root}" 2> /dev/null || true
+
+print_run_summary
 
 # Finish
 end_time=$(date --utc +%s)

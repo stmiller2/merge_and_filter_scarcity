@@ -1,5 +1,5 @@
-# NGS Processing Pipeline - Version 11.0
-**Updated:** 10/19/2026
+# NGS Processing Pipeline - Version 12.0
+**Updated:** 11/20/2026
 
 **Contact:** stmiller2@wisc.edu
 
@@ -78,12 +78,12 @@ Before submitting, you can estimate how `q_floor`, `q_cutoff` and `cutoff_pct` w
 chmod +x preview_filters.sh
 ./preview_filters.sh params.env | less -R
 ```
-This takes a random subsample of 100,000 reads (or pairs) from each sample. Merges/concatenates as described in your `params.env`, and applies the quality filtering script with every combination of q_floor 0–20 (step 2), q_cutoff 0–30 (step 5) and cutoff_pct 0.50–0.95 (step 0.05). It also does a run with whatever settings are currently set in `params.env`.  `merge`, `singleend`, `end_slop` and the PEAR settings come from `params.env`.
+This takes a random subsample of 50,000 reads (or pairs) from each sample. Merges/concatenates as described in your `params.env`, and applies the quality filtering script with every combination of q_floor 0–20 (step 5), q_cutoff 0–30 (step 5) and cutoff_pct 0.50–0.95 (step 0.05). It also does a run with whatever settings are currently set in `params.env`.  `merge`, `singleend`, `end_slop` and the PEAR settings come from `params.env`.
 
 Output is:
 - read fates at your current settings
 - a bar chart of E1 losses vs q_floor
-- one heatmap per q_cutoff of the % of reads kept
+- one heatmap per q_floor of the % of reads kept
 - a per-sample table at your current settings
 
 Options: `-n N` reads to test on per sample, `-m M` only scan the first M reads of each file (faster for very large files, slightly less representative), `-s SAMPLE` one sample only, `-a` full tables for every sample, `--no-color`. The full report for every sample is saved to `logs/filter_preview.txt`, and the raw counts to `logs/filter_preview_grid.csv` / `logs/filter_preview_samples.csv`.

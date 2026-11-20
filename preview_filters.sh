@@ -3,27 +3,19 @@ set -euo pipefail
 # extglob must be enabled before the functions that use +(...)/?(...) are parsed
 shopt -s extglob
 
-# -----------------------------------------------------------------------------
-# Estimate how the quality-filter settings (q_floor, q_cutoff, cutoff_pct) would
-# affect read attrition, from a random subsample of each sample's reads.
-# Runs locally (light compute on the submit node); nothing goes to HTCondor.
-# Reads reach the filter exactly as in merge_reads.sh (PEAR-merged,
-# R1 + revcomp(R2), or single-end), and the filter decision is QF3's.
-# -----------------------------------------------------------------------------
-
 usage() {
     cat <<'EOF'
 Usage: ./preview_filters.sh <params_file.env> [options]
 
 Estimates the % of reads kept / lost (E1, E2, E3, and PEAR when merge=TRUE)
 for a fixed grid of quality-filter settings:
-  q_floor    0-20 (step 2)
+  q_floor    0-20 (step 5)
   q_cutoff   0-30 (step 5)
   cutoff_pct 0.50-0.95 (step 0.05)
 Other settings (merge, singleend, end_slop, PEAR params) come from the params file.
 
 Options:
-  -n N        reads (pairs, if paired-end) to sample per sample   [default 100000]
+  -n N        reads (pairs, if paired-end) to sample per sample   [default 50000]
   -m M        only scan the first M reads of each sample. Faster for very large
               files, but slightly less representative (the first reads in a
               fastq come from the first tiles imaged)              [default: whole file]
@@ -45,7 +37,7 @@ EOF
 # Arguments
 # -----------------------------------------------------------------------------
 params_file=""
-n_sample=100000
+n_sample=50000
 max_scan=0
 only_sample=""
 show_all=0
@@ -77,7 +69,7 @@ fastq_dir="${pipeline_dir}/Fastq"
 log_dir="${pipeline_dir}/logs"
 
 # -----------------------------------------------------------------------------
-# Checks (only what the preview needs)
+# Checks
 # -----------------------------------------------------------------------------
 errors=()
 [[ "$n_sample" =~ ^[1-9][0-9]*$ ]] || errors+=("-n must be a positive integer (got '${n_sample}').")
@@ -130,7 +122,6 @@ derive_sample_names() {
     printf '%s\n' "${names[@]}" | awk 'NF && !seen[$0]++'
 }
 
-# Same strict pattern as merge_reads.sh, so sample 'A' doesn't pick up 'A_2'
 find_sample_fastqs() {
     local s="$1"
     shopt -s nullglob
@@ -181,14 +172,8 @@ samples_csv="${log_dir}/filter_preview_samples.csv"
 report_txt="${log_dir}/filter_preview.txt"
 rm -f -- "$grid_csv" "$samples_csv" "$report_txt"
 
-# Reservoir sampler: reads R1 and/or R2 in lockstep (each file decompressed
-# once) and keeps a uniform random sample of N reads/pairs from the first M
-# (M = 0: whole file). Fixed seed, so reruns give the same subsample.
-#   modes:  fastq   -> <out>_R1.fastq + <out>_R2.fastq (for PEAR)
-#           concat  -> <out>.qf  R1 + revcomp(R2)     (merge=FALSE)
-#           rc      -> <out>.qf  revcomp(R2)          (single-end R2)
-#           plain   -> <out>.qf  R1                   (single-end R1)
-# Prints "<reads scanned> <reads kept>" to stdout.
+# Reservoir sampler (fixed seed). Modes: fastq (R1/R2 for PEAR), concat (R1 + revcomp(R2)),
+# rc (revcomp(R2)), plain (R1). Prints "<reads scanned> <reads kept>".
 sampler_perl='
 use strict; use warnings;
 my ($n, $max, $mode, $out, $n1, @files) = @ARGV;
@@ -234,7 +219,7 @@ while (1) {
         $ka[$slot] = "$a[1] $a[2]\n";
     }
 }
-# Stopping early (-m) closes zcat mid-stream, so its exit status is ignored then
+# With -m, zcat is closed mid-stream, so its exit status is ignored
 if (!close($fa) && !$early) { die "zcat failed reading input\n"; }
 if ($fb && !close($fb) && !$early) { die "zcat failed reading R2 input\n"; }
 sub write_out { my ($path, $recs) = @_; open(my $o, ">", $path) or die "cannot write $path: $!\n"; print $o @$recs; close($o) or die "error writing $path\n"; }
@@ -264,7 +249,6 @@ for i in "${sample_names_array[@]}"; do
         if [[ "$f" == *_R2_001.fastq* ]]; then r2_files+=("$f"); else r1_files+=("$f"); fi
     done
 
-    # Same read handling (and same per-sample errors) as merge_reads.sh
     err=""
     if [ "$merge" == "TRUE" ]; then
         qf_ends="LR"; mode="fastq"
@@ -347,10 +331,8 @@ header() {
 
 render_args=("$grid_csv" "$samples_csv" "$q_floor" "$q_cutoff" "$cutoff_pct" "$end_slop" "$merge")
 
-# Plain-text report with every sample, saved to logs/
 { header; "$qfscan" render "${render_args[@]}" 0 0 1; } > "$report_txt"
 
-# Terminal: colour only when writing to a terminal that supports it
 use_color=0
 if [ "$color_opt" -eq 1 ] && [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
     use_color=1

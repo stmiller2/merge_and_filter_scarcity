@@ -1,18 +1,5 @@
-// QFscan.cpp -- used by preview_filters.sh (not by the main pipeline).
-//
-// scan:   reads QF3-format lines ("SEQUENCE QUALITY") from stdin and counts
-//         how many reads QF3 would put in each fate (good / E1 / E2 / E3) for
-//         every combination of the fixed grid below, plus the current settings.
-// render: reads the CSVs written by scan and prints text heatmaps.
-//
-// The per-read decision must stay identical to QF3_template.cpp:
-//   region checked = [slop_left, len - slop_right)
-//   E3: region is empty
-//   E1: any base in the region has Q < q_floor
-//   E2: (bases in region with Q >= q_cutoff) / region length <= cutoff_pct
-//   good otherwise
-// QF3 stores cutoff_pct as a float, so the comparison here is also against
-// (double)(float)cutoff_pct. This only matters for reads exactly on the cutoff.
+// Used by preview_filters.sh. The per-read decision must stay identical to QF3_template.cpp.
+// QF3 stores cutoff_pct as a float, so it is compared as (double)(float)cutoff_pct here too.
 
 #include <algorithm>
 #include <cmath>
@@ -27,12 +14,10 @@
 #include <vector>
 using namespace std;
 
-// Fixed scan grid
-const vector<int> FLOORS = {0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20};
+const vector<int> FLOORS = {0, 5, 10, 15, 20};
 const vector<int> CUTOFFS = {0, 5, 10, 15, 20, 25, 30};
 const vector<double> PCTS = {0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95};
 
-// Grid key: q_floor, q_cutoff, cutoff_pct * 10000 (rounded)
 typedef vector<long> Key;
 Key make_key(int f, int c, double p) { return Key{f, c, lround(p * 10000)}; }
 
@@ -70,15 +55,13 @@ int scan(int argc, char* argv[])
 	const int slop_left  = (ends == "L" || ends == "LR") ? end_slop : 0;
 	const int slop_right = (ends == "R" || ends == "LR") ? end_slop : 0;
 
-	// Axes: the grid, with the current settings appended as an extra point
 	vector<int> floors = FLOORS;   floors.push_back(cur_floor);
 	vector<int> cutoffs = CUTOFFS; cutoffs.push_back(cur_cutoff);
-	vector<double> thr;            // cutoff_pct thresholds as QF3 sees them
+	vector<double> thr;
 	for(double p : PCTS) thr.push_back(double(float(p)));
 	thr.push_back(double(float(cur_pct)));
 	const size_t nf = floors.size(), nc = cutoffs.size(), np = thr.size();
 
-	// good[f][c][p], e2 likewise; e1 depends on q_floor only
 	vector<double> good(nf * nc * np, 0), e2(nf * nc * np, 0), e1(nf, 0);
 	double e3 = 0;
 	long n_reads = 0;
@@ -123,11 +106,9 @@ int scan(int argc, char* argv[])
 		}
 	}
 
-	// Q values present
 	vector<int> qvals;
 	for(int k = 0; k < 256; k++) if(qseen[k]) qvals.push_back(k - 33);
 
-	// Write grid rows (header if the file is new/empty)
 	bool new_grid;
 	{ ifstream t(grid_path); new_grid = !t.good() || t.peek() == ifstream::traits_type::eof(); }
 	ofstream g(grid_path, ios::app);
@@ -170,14 +151,13 @@ int scan(int argc, char* argv[])
 struct Block
 {
 	string title;
-	double total = 0, pear_un = 0, pear_disc = 0;   // input reads and PEAR losses
+	double total = 0, pear_un = 0, pear_disc = 0;
 	map<Key, Counts> grid;
 	set<int> qvals;
 };
 
 bool use_color = false, use_utf8 = false;
 
-// viridis-like ramp in the xterm 256-colour cube, dark to light
 const int PAL[9] = {53, 55, 61, 25, 30, 36, 77, 149, 220};
 const int PAL_FG[9] = {255, 255, 255, 255, 255, 16, 16, 16, 16};
 
@@ -217,7 +197,6 @@ string rule(const string& title)
 
 string bar(double frac, int width)
 {
-	// frac in [0,1] -> bar of up to `width` characters (eighth blocks if UTF-8)
 	if(frac <= 0) return "";
 	if(!use_utf8) return string(max(1, (int)lround(frac * width)), '#');
 	static const char* EIGHTHS[8] = {"▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"};
@@ -249,7 +228,6 @@ void print_block(const Block& b, int cur_floor, int cur_cutoff, double cur_pct,
 	cout << '\n' << rule(b.title) << '\n';
 	cout << "Q values present: " << qvals_str(b.qvals) << '\n';
 
-	// Breakdown at current settings
 	auto it = b.grid.find(cur_key);
 	if(it != b.grid.end())
 	{
@@ -269,7 +247,6 @@ void print_block(const Block& b, int cur_floor, int cur_cutoff, double cur_pct,
 		if(slop_on || c.e3 > 0) line("Poor E3: too short after removing end slop", c.e3);
 	}
 
-	// E1 depends on q_floor only
 	cout << "\nE1 (>=1 base below q_floor), % of input reads. Same for every q_cutoff/cutoff_pct:\n";
 	double e1max = 0;
 	vector<double> e1s;
@@ -286,7 +263,6 @@ void print_block(const Block& b, int cur_floor, int cur_cutoff, double cur_pct,
 		cout << "  (PEAR losses, " << strf("%.2f%%", pct(b.pear_un + b.pear_disc))
 		     << " of input reads, happen before filtering and are the same in every cell below)\n";
 
-	// Colour scale over this block's grid
 	double vmin = 1e300, vmax = -1e300;
 	for(int f : FLOORS) for(int c : CUTOFFS) for(double p : PCTS)
 	{
@@ -304,15 +280,15 @@ void print_block(const Block& b, int cur_floor, int cur_cutoff, double cur_pct,
 	}
 
 	bool cur_on_grid = on_grid(cur_floor, cur_cutoff, cur_pct);
-	for(int c : CUTOFFS)
+	for(int f : FLOORS)
 	{
-		cout << '\n' << bold("q_cutoff = Q" + to_string(c)) << (c == cur_cutoff ? "  (current)" : "") << '\n';
-		cout << "q_floor   cutoff_pct:\n         ";
+		cout << '\n' << bold("q_floor = Q" + to_string(f)) << (f == cur_floor ? "  (current)" : "") << '\n';
+		cout << "q_cutoff  cutoff_pct:\n         ";
 		for(double p : PCTS) cout << strf(" %5.2f ", p);
 		cout << '\n';
-		for(int f : FLOORS)
+		for(int c : CUTOFFS)
 		{
-			cout << (f == cur_floor ? bold(strf("%7.0f  ", f)) : strf("%7.0f  ", f));
+			cout << (c == cur_cutoff ? bold(strf("%7.0f  ", c)) : strf("%7.0f  ", c));
 			for(double p : PCTS)
 			{
 				double v = pct(b.grid.at(make_key(f, c, p)).good);
@@ -327,7 +303,6 @@ void print_block(const Block& b, int cur_floor, int cur_cutoff, double cur_pct,
 		cout << "\n(Current settings are not on the grid; their estimate is in the breakdown above.)\n";
 }
 
-// Split a CSV line (no quoting needed: sample names and fields contain no commas)
 vector<string> split_csv(const string& line)
 {
 	vector<string> out;
@@ -356,10 +331,9 @@ int render(int argc, char* argv[])
 	bool show_all = string(argv[11]) == "1";
 	bool slop_on = end_slop_label != "FALSE" && atoi(end_slop_label.c_str()) > 0;
 
-	// Per-sample metadata
 	vector<string> order;
 	map<string, Block> blocks;
-	map<string, double> weight;   // reads_in_file / reads_sampled, for the pooled estimate
+	map<string, double> weight;
 	map<string, double> in_file;
 	ifstream sf(samples_path);
 	if(!sf) { cerr << "QFscan: cannot read " << samples_path << '\n'; return 1; }
@@ -393,7 +367,6 @@ int render(int argc, char* argv[])
 		c.e1 = atof(v[4].c_str()); c.e2 = atof(v[5].c_str()); c.e3 = atof(v[6].c_str()); c.good = atof(v[7].c_str());
 	}
 
-	// Pooled block: each sample weighted by its read depth, so it estimates the whole run
 	Block pooled;
 	double total_in_file = 0;
 	for(const string& s : order)
@@ -425,7 +398,6 @@ int render(int argc, char* argv[])
 
 	print_block(pooled, cur_floor, cur_cutoff, cur_pct, end_slop_label, merge, slop_on);
 
-	// Per-sample table at current settings
 	Key cur_key = make_key(cur_floor, cur_cutoff, cur_pct);
 	size_t w = 6;
 	for(const string& s : order) w = max(w, s.size());

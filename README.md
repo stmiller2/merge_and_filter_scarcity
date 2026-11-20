@@ -53,23 +53,23 @@ vi params.env
 
 | PARAMETER         | VALUE      | DESCRIPTION |
 |-------------------|------------|-------------|
-| pear_filepath     | filepath   | Path to the PEAR executable - `/mnt/cephfs/bifxapps/bin/pear` |
-| pear_overlap      | int        | Minimum overlap for merging (see PEAR docs) – suggest 10 |
-| pear_stattest     | int        | PEAR merging statistical test (see PEAR docs) – suggest 1 |
-| pear_pvalue       | float      | P-value for PEAR statistical test. Set to 1.0 to disable the test |
 | merge             | TRUE/FALSE | TRUE for overlapping paired-end reads – merges reads with PEAR. If FALSE, PEAR parameters are ignored and R1 is concatenated to the reverse complement of R2 |
 | singleend         | TRUE/FALSE | FALSE for merging paired-end reads; TRUE for formatting & filtering single-end reads |
-| compiler_filepath | filepath   | Path to g++ executable (C++ compiler) - `/usr/bin/g++` |
-| perl_filepath     | filepath   | Path to perl executable - `/usr/bin/perl` (Only needed for reverse-complementing when merge=FALSE) |
-| cpus              | int        | Number of cores requested – suggest 8 |
-| memory            | int + K/M/G | Amount of RAM requested – suggest 4G. **Needs K/M/G suffix, not KB/MB/GB** |
-| disk              | int + unit | Amount of disk space requested – suggest 60GB |
 | q_floor           | int        | Reads with any bases below this value are discarded |
 | q_cutoff          | int        | Reads with too many bases below this value are discarded (see cutoff_pct) |
 | cutoff_pct        | float      | Proportion of bases that must be at or above q_cutoff for a read to be kept |
 | end_slop          | int or FALSE | Number of bases at sequencing-read 5' ends exempted from quality filtering. Suggest FALSE unless necessary (inspect fastqs for early-cycle N's) |
 | trim_slop         | TRUE/FALSE | Remove end_slop bases from output sequences - suggest TRUE if using end_slop. If FALSE, they are kept in the output but still not used for quality filtering |
+| cpus              | int        | Number of cores requested – suggest 8 |
+| memory            | int + K/M/G | Amount of RAM requested – suggest 4G. **Needs K/M/G suffix, not KB/MB/GB** |
+| disk              | int + unit | Amount of disk space requested – suggest 60GB |
 | space_saver       | TRUE/FALSE | Deletes intermediate files (`work/<sample>/`) once run finishes and gzips `poor_reads` csvs |
+| pear_filepath     | filepath   | Path to the PEAR executable - `/mnt/cephfs/bifxapps/bin/pear` |
+| pear_overlap      | int        | Minimum overlap for merging (see PEAR docs) – suggest 10 |
+| pear_stattest     | int        | PEAR merging statistical test (see PEAR docs) – suggest 1 |
+| pear_pvalue       | float      | P-value for PEAR statistical test. Set to 1.0 to disable the test |
+| compiler_filepath | filepath   | Path to g++ executable (C++ compiler) - `/usr/bin/g++` |
+| perl_filepath     | filepath   | Path to perl executable - `/usr/bin/perl` (Only needed for reverse-complementing when merge=FALSE) |
 | notify_email      | email      | Optional. If set, HTCondor emails this address if the job errors out. Leave blank to disable. |
 
 ### STEP 4b (optional) — Preview quality-filter settings

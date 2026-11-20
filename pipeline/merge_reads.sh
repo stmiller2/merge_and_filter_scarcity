@@ -196,38 +196,48 @@ pct_of() {
     awk -v n="$1" -v t="$2" 'BEGIN {printf "%.2f", (t > 0 ? 100 * n / t : 0)}'
 }
 
+commas() {
+    local n="$1" out=""
+    while [ "${#n}" -gt 3 ]; do
+        out=",${n: -3}${out}"
+        n="${n:0:${#n}-3}"
+    done
+    echo "${n}${out}"
+}
+
 # summary_line <label> <count> <total>
 summary_line() {
-    printf "  %-46s %15s  %6s%%\n" "$1" "$(printf "%'d" "$2")" "$(pct_of "$2" "$3")"
+    printf "  %-46s %15s  %6s%%\n" "$1" "$(commas "$2")" "$(pct_of "$2" "$3")"
 }
 
 # summary_block <title> <total> <unassembled> <discarded> <e1> <e2> <e3> <good>
 summary_block() {
     local title="$1" total="$2" unas="$3" disc="$4" e1="$5" e2="$6" e3="$7" good="$8"
     echo ""
-    echo "${title}: $(printf "%'d" "$total") input reads"
+    echo "${title}: $(commas "$total") input reads"
     summary_line "Good (passed all filters)" "$good" "$total"
     if [ "$merge" == "TRUE" ]; then
         summary_line "PEAR: not assembled" "$unas" "$total"
         summary_line "PEAR: discarded" "$disc" "$total"
     fi
-    summary_line "Poor E1: >=1 base below Q${q_floor}" "$e1" "$total"
-    summary_line "Poor E2: <=${cutoff_pct} of bases at >=Q${q_cutoff}" "$e2" "$total"
-    if [ "$slop_on" == "TRUE" ] || [ "$e3" -gt 0 ]; then
+    if [ "$e1" -gt 0 ]; then
+        summary_line "Poor E1: >=1 base below Q${q_floor}" "$e1" "$total"
+    fi
+    if [ "$e2" -gt 0 ]; then
+        summary_line "Poor E2: <=${cutoff_pct} of bases at >=Q${q_cutoff}" "$e2" "$total"
+    fi
+    if [ "$e3" -gt 0 ]; then
         summary_line "Poor E3: too short after removing end slop" "$e3" "$total"
     fi
 }
 
 print_run_summary() {
-    local row s total unas disc e1 e2 e3 good poor_ext
+    local row s total unas disc e1 e2 e3 good
     local sum_total=0 sum_unas=0 sum_disc=0 sum_e1=0 sum_e2=0 sum_e3=0 sum_good=0
-    slop_on=FALSE
-    if [[ "${end_slop:-FALSE}" =~ ^[0-9]+$ ]] && (( 10#${end_slop} > 0 )); then slop_on=TRUE; fi
 
     echo -e "\n\033[1m$(printf %80s |tr " " "=")\033[0m"
     echo -e "\033[1m$(printf %33s)RUN SUMMARY\033[0m"
     echo -e "\033[1m$(printf %80s |tr " " "=")\033[0m"
-    echo "Percentages are of each sample's input reads (overall: of all input reads)."
 
     if [ "${#summary_rows[@]}" -gt 0 ]; then
         for row in "${summary_rows[@]}"; do
@@ -244,21 +254,6 @@ print_run_summary() {
     if [ "${#failed_samples[@]}" -gt 0 ]; then
         echo -e "\nFailed samples (not included above): ${failed_samples[*]}"
     fi
-
-    [ "$space_saver" == "TRUE" ] && poor_ext="csv.gz" || poor_ext="csv"
-    echo -e "\nWhere these reads are:"
-    echo "  Good                 csvs/good_reads/good_reads_<sample>.csv"
-    echo "  Poor (E1/E2/E3)      csvs/poor_reads/poor_reads_<sample>.${poor_ext} (code in column 2)"
-    if [ "$merge" == "TRUE" ]; then
-        if [ "$space_saver" == "TRUE" ]; then
-            echo "  PEAR not assembled   deleted with work/<sample>/ (space_saver=TRUE)"
-            echo "  PEAR discarded       deleted with work/<sample>/ (space_saver=TRUE)"
-        else
-            echo "  PEAR not assembled   work/<sample>/combined.unassembled.{forward,reverse}.fastq"
-            echo "  PEAR discarded       work/<sample>/combined.discarded.fastq"
-        fi
-    fi
-    echo "  Per-sample counts    csvs/info/info_<sample>.csv"
 }
 
 failed_samples=()
